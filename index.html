@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Word to MarkDown Converter + MD Viewer</title>
+
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+
+    <style>
+        /* --- BASE STYLING --- */
+        body { font-family: system-ui, -apple-system, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; background-color: #f0f2f5; color: #1a1a1a; }
+        .card { background: white; padding: 2rem; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); margin-bottom: 1rem; }
+        .hidden { display: none !important; }
+        
+        /* Upload & Loading */
+        .upload-area { border: 2px dashed #ccc; border-radius: 8px; padding: 4rem 2rem; text-align: center; background: #fafafa; cursor: pointer; transition: all 0.3s ease; }
+        .upload-area:hover { border-color: #0066cc; background: #f0f7ff; }
+        .upload-area.dragover { border-color: #28a745; background: #e8f5e9; transform: scale(1.02); }
+        .loader { text-align: center; padding: 3rem; font-size: 1.2rem; color: #555; }
+        
+        /* Workspace Header */
+        .editor-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; border-bottom: 2px solid #eee; padding-bottom: 1rem; }
+        .tabs { display: flex; gap: 0.5rem; }
+        .tab-btn { background: transparent; color: #555; border: none; padding: 0.5rem 1rem; font-weight: bold; cursor: pointer; border-radius: 6px; }
+        .tab-btn.active { background: #e4e6eb; color: #000; }
+        
+        /* Editor Area */
+        .workspace { width: 100%; height: 55vh; border: 1px solid #ddd; border-radius: 6px; background: #fdfdfd; overflow-y: auto; }
+        textarea { width: 100%; height: 100%; padding: 1rem; font-family: 'Courier New', monospace; font-size: 14px; line-height: 1.6; border: none; resize: none; box-sizing: border-box; outline: none; }
+        
+        /* Action Buttons */
+        .action-btns { display: flex; gap: 0.5rem; }
+        .action-btns button { background: #0066cc; color: white; border: none; padding: 0.5rem 1rem; border-radius: 6px; font-weight: bold; cursor: pointer; transition: background 0.2s; }
+        .action-btns button:hover { background: #0052a3; }
+        .action-btns button.secondary { background: transparent; color: #555; border: 1px solid #ccc; }
+        .action-btns button.secondary:hover { background: #eee; }
+        .action-btns button.danger { background: transparent; color: #d9534f; border: 1px solid #d9534f; }
+        .action-btns button.danger:hover { background: #d9534f; color: white; }
+
+        /* --- PRO MARKDOWN PREVIEW STYLING --- */
+        #visual-preview {
+            padding: 2rem;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+            line-height: 1.6;
+            color: #24292e;
+            background: #fff;
+        }
+        #visual-preview h1, #visual-preview h2 { border-bottom: 1px solid #eaecef; padding-bottom: 0.3em; margin-top: 1.5em; font-weight: 600; }
+        #visual-preview h1 { font-size: 2em; }
+        #visual-preview h2 { font-size: 1.5em; }
+        #visual-preview h3 { font-size: 1.25em; margin-top: 1.5em; }
+        #visual-preview p { margin-top: 0; margin-bottom: 16px; }
+        #visual-preview table { border-collapse: collapse; width: 100%; margin-bottom: 16px; }
+        #visual-preview table th, #visual-preview table td { padding: 8px 13px; border: 1px solid #dfe2e5; }
+        #visual-preview table th { background-color: #f6f8fa; font-weight: 600; text-align: left; }
+        #visual-preview table tr:nth-child(2n) { background-color: #f6f8fa; }
+        #visual-preview code { padding: 0.2em 0.4em; margin: 0; font-size: 85%; background-color: rgba(27,31,35,0.05); border-radius: 3px; font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; }
+        #visual-preview pre { padding: 16px; overflow: auto; font-size: 85%; line-height: 1.45; background-color: #f6f8fa; border-radius: 6px; margin-bottom: 16px; }
+        #visual-preview pre code { background-color: transparent; padding: 0; }
+        #visual-preview blockquote { padding: 0 1em; color: #6a737d; border-left: 0.25em solid #dfe2e5; margin: 0 0 16px 0; }
+    </style>
+</head>
+<body>
+
+    <div class="card">
+        <h1>Markdown Studio</h1>
+        
+        <div id="step-upload">
+            <div class="upload-area" id="drop-zone" onclick="document.getElementById('file-input').click()">
+                <h3 style="margin-top:0;">📁 Drag & Drop a .docx or .md file</h3>
+                <p>Convert Word to Markdown using local AI, or instantly preview existing Markdown files.</p>
+                <input type="file" id="file-input" accept=".docx,.DOCX,.md,.MD,.txt" class="hidden" />
+            </div>
+        </div>
+
+        <div id="step-loading" class="loader hidden">
+            <h3>⏳ AI is processing your document...</h3>
+            <p>Extracting text, tables, and formatting.</p>
+        </div>
+
+        <div id="step-workspace" class="hidden">
+            <div class="editor-header">
+                <div class="tabs">
+                    <button id="btn-tab-edit" class="tab-btn active">📝 Edit Markdown</button>
+                    <button id="btn-tab-preview" class="tab-btn">👁️ Visual Preview</button>
+                </div>
+                <div class="action-btns">
+                    <button class="danger" onclick="resetApp()">Close File</button>
+                    <button id="btn-copy" class="secondary">📋 Copy</button>
+                    <button id="btn-save">💾 Save As...</button>
+                </div>
+            </div>
+            <div class="workspace">
+                <textarea id="markdown-editor"></textarea>
+                <div id="visual-preview" class="hidden"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const fileInput = document.getElementById('file-input');
+        const dropZone = document.getElementById('drop-zone');
+        const stepUpload = document.getElementById('step-upload');
+        const stepLoading = document.getElementById('step-loading');
+        const stepWorkspace = document.getElementById('step-workspace');
+        const markdownEditor = document.getElementById('markdown-editor');
+        const visualPreview = document.getElementById('visual-preview');
+        const btnTabEdit = document.getElementById('btn-tab-edit');
+        const btnTabPreview = document.getElementById('btn-tab-preview');
+        const btnSave = document.getElementById('btn-save');
+        const btnCopy = document.getElementById('btn-copy');
+
+        // Drag and Drop Logic
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, e => { e.preventDefault(); e.stopPropagation(); }, false);
+            document.body.addEventListener(eventName, e => { e.preventDefault(); e.stopPropagation(); }, false);
+        });
+        ['dragenter', 'dragover'].forEach(eventName => dropZone.addEventListener(eventName, () => dropZone.classList.add('dragover'), false));
+        ['dragleave', 'drop'].forEach(eventName => dropZone.addEventListener(eventName, () => dropZone.classList.remove('dragover'), false));
+
+        // The Smart Router: Checks if the file is DOCX or MD
+        function processFile(file) {
+            if (!file) return;
+            const fileName = file.name.toLowerCase();
+            
+            if (fileName.endsWith('.docx')) {
+                startDocxConversion(file);
+            } else if (fileName.endsWith('.md') || fileName.endsWith('.txt')) {
+                openLocalMarkdown(file);
+            } else {
+                alert("Please drop a valid .docx or .md file!");
+            }
+        }
+
+        dropZone.addEventListener('drop', e => processFile(e.dataTransfer.files[0]));
+        fileInput.addEventListener('change', e => processFile(e.target.files[0]));
+
+        // Path A: The Python AI Converter (For .docx)
+        function startDocxConversion(file) {
+            stepUpload.classList.add('hidden');
+            stepLoading.classList.remove('hidden');
+            
+            const formData = new FormData();
+            formData.append("file", file);
+
+            fetch("http://127.0.0.1:8000/api/convert", {
+                method: "POST",
+                body: formData
+            })
+            .then(response => {
+                if (!response.ok) throw new Error("Network response was not ok. Is the Python server running?");
+                return response.json();
+            })
+            .then(data => {
+                if (data.error) throw new Error(data.error);
+                markdownEditor.value = data.markdown;
+                stepLoading.classList.add('hidden');
+                stepWorkspace.classList.remove('hidden');
+                window.currentFileName = file.name.replace(/\.[^/.]+$/, "");
+                
+                // Switch to edit tab by default for conversions
+                btnTabEdit.click(); 
+            })
+            .catch(err => { 
+                alert("Conversion failed. Details: " + err.message); 
+                resetApp(); 
+            });
+        }
+
+        // Path B: The Instant Local Viewer (For .md)
+        function openLocalMarkdown(file) {
+            const reader = new FileReader();
+            
+            reader.onload = function(e) {
+                // Instantly load the text into the editor
+                markdownEditor.value = e.target.result;
+                window.currentFileName = file.name.replace(/\.[^/.]+$/, "");
+                
+                // Hide upload screen, show workspace
+                stepUpload.classList.add('hidden');
+                stepWorkspace.classList.remove('hidden');
+                
+                // Automatically click the Preview tab for immediate reading
+                btnTabPreview.click();
+            };
+            
+            reader.onerror = function() {
+                alert("Error reading the file from your computer.");
+            };
+            
+            // Tell the browser to read the file as plain text
+            reader.readAsText(file);
+        }
+
+        // Tab Logic
+        btnTabPreview.addEventListener('click', () => {
+            btnTabEdit.classList.remove('active'); btnTabPreview.classList.add('active');
+            markdownEditor.classList.add('hidden'); visualPreview.classList.remove('hidden');
+            visualPreview.innerHTML = marked.parse(markdownEditor.value);
+        });
+
+        btnTabEdit.addEventListener('click', () => {
+            btnTabPreview.classList.remove('active'); btnTabEdit.classList.add('active');
+            visualPreview.classList.add('hidden'); markdownEditor.classList.remove('hidden');
+        });
+
+        // Copy to Clipboard Logic
+        btnCopy.addEventListener('click', () => {
+            navigator.clipboard.writeText(markdownEditor.value).then(() => {
+                const originalText = btnCopy.innerHTML;
+                btnCopy.innerHTML = "✅ Copied!";
+                setTimeout(() => { btnCopy.innerHTML = originalText; }, 2000);
+            }).catch(err => {
+                alert("Failed to copy text: " + err);
+            });
+        });
+
+        // Save Logic (Native File Picker)
+        btnSave.addEventListener('click', async function() {
+            const textToSave = markdownEditor.value;
+            if (window.showSaveFilePicker) {
+                try {
+                    const fileHandle = await window.showSaveFilePicker({
+                        suggestedName: (window.currentFileName || "document") + ".md",
+                        types: [{ description: 'Markdown File', accept: { 'text/markdown': ['.md'] } }],
+                    });
+                    const writable = await fileHandle.createWritable();
+                    await writable.write(textToSave);
+                    await writable.close();
+                } catch (err) { if (err.name !== 'AbortError') alert("An error occurred while saving."); }
+            } else {
+                const blob = new Blob([textToSave], { type: "text/markdown;charset=utf-8" });
+                const link = document.createElement("a");
+                link.href = URL.createObjectURL(blob);
+                link.download = (window.currentFileName || "document") + ".md";
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            }
+        });
+
+        function resetApp() {
+            fileInput.value = ''; markdownEditor.value = ''; visualPreview.innerHTML = '';
+            btnTabEdit.click(); stepWorkspace.classList.add('hidden'); stepLoading.classList.add('hidden'); stepUpload.classList.remove('hidden');
+        }
+    </script>
+</body>
+</html>
