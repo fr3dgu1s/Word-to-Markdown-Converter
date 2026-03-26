@@ -27,6 +27,15 @@ To run this application, you must have **Python 3.14** installed.
 1. **Download:** [Python 3.14 Official Release](https://www.python.org/downloads/windows/)
 2. **Verification:** Open PowerShell and type `python --version`. It must show `3.14.x`.
 
+Alternatively, you can 
+
+Open your terminal and run:
+```bash
+python
+```
+
+It will open Microsoft Store and you can install from there, this method is easier as it set the system environmets for you. 
+
 ---
 
 ## 🚀 Step-by-Step Deployment
