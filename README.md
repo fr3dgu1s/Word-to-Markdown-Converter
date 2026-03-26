@@ -41,7 +41,7 @@ Download this repository to a folder on your local drive (e.g., `C:\temp\Word-to
 
 Open your terminal in the project folder and run:
 ```bash
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 ```
 
 ### 3. Start the Backend Server
