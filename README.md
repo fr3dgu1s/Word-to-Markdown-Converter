@@ -1,4 +1,5 @@
-# Word to MD — Easy Converter 🚀
+# Word to MD — Easy Converter 🚀 
+## An Easy way to convert you Functional Spec into Markdown
 
 A local-first tool to convert Microsoft Word documents (`.docx`) into clean, GitHub-style Markdown (`.md`).
 
@@ -71,6 +72,8 @@ Wait for: `Starting FastAPI server on http://127.0.0.1:8000`
 
 Open **Microsoft Edger** or any other browser installed, and on the search bar type: `http://127.0.0.1:8000` - The app will open and you are able to convert the files into markdown format. 
 
+> [!NOTE]
+> When you finish using, click on the link on top right and it will stop the python app and close the app session
 ---
 
 ## 💡 Features
