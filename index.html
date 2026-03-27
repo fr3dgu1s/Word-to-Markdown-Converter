@@ -3,247 +3,536 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Word to MarkDown Converter + MD Viewer</title>
+    <title>Spec to Markdown Studio</title>
 
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
 
     <style>
-        /* --- BASE STYLING --- */
-        body { font-family: system-ui, -apple-system, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; background-color: #f0f2f5; color: #1a1a1a; }
+        /* --- BASE --- */
+        body { font-family: system-ui, -apple-system, sans-serif; max-width: 960px; margin: 2rem auto; padding: 0 1rem; background-color: #f0f2f5; color: #1a1a1a; }
         .card { background: white; padding: 2rem; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); margin-bottom: 1rem; }
         .hidden { display: none !important; }
-        
-        /* Upload & Loading */
+
+        /* --- UPLOAD --- */
         .upload-area { border: 2px dashed #ccc; border-radius: 8px; padding: 4rem 2rem; text-align: center; background: #fafafa; cursor: pointer; transition: all 0.3s ease; }
         .upload-area:hover { border-color: #0066cc; background: #f0f7ff; }
         .upload-area.dragover { border-color: #28a745; background: #e8f5e9; transform: scale(1.02); }
         .loader { text-align: center; padding: 3rem; font-size: 1.2rem; color: #555; }
-        
-        /* Workspace Header */
-        .editor-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; border-bottom: 2px solid #eee; padding-bottom: 1rem; }
+
+        /* --- WORKSPACE HEADER --- */
+        .editor-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; border-bottom: 2px solid #eee; padding-bottom: 1rem; flex-wrap: wrap; gap: 0.5rem; }
         .tabs { display: flex; gap: 0.5rem; }
-        .tab-btn { background: transparent; color: #555; border: none; padding: 0.5rem 1rem; font-weight: bold; cursor: pointer; border-radius: 6px; }
+        .tab-btn { background: transparent; color: #555; border: none; padding: 0.5rem 1rem; font-weight: bold; cursor: pointer; border-radius: 6px; font-size: 0.9rem; }
         .tab-btn.active { background: #e4e6eb; color: #000; }
-        
-        /* Editor Area */
-        .workspace { width: 100%; height: 55vh; border: 1px solid #ddd; border-radius: 6px; background: #fdfdfd; overflow-y: auto; }
-        textarea { width: 100%; height: 100%; padding: 1rem; font-family: 'Courier New', monospace; font-size: 14px; line-height: 1.6; border: none; resize: none; box-sizing: border-box; outline: none; }
-        
+
         /* Action Buttons */
-        .action-btns { display: flex; gap: 0.5rem; }
-        .action-btns button { background: #0066cc; color: white; border: none; padding: 0.5rem 1rem; border-radius: 6px; font-weight: bold; cursor: pointer; transition: background 0.2s; }
-        .action-btns button:hover { background: #0052a3; }
+        .action-btns { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+        .action-btns button { border: none; padding: 0.45rem 0.9rem; border-radius: 6px; font-weight: bold; cursor: pointer; transition: background 0.2s; font-size: 0.82rem; }
+        .action-btns button.primary   { background: #0066cc; color: white; }
+        .action-btns button.primary:hover { background: #0052a3; }
         .action-btns button.secondary { background: transparent; color: #555; border: 1px solid #ccc; }
         .action-btns button.secondary:hover { background: #eee; }
-        .action-btns button.danger { background: transparent; color: #d9534f; border: 1px solid #d9534f; }
+        .action-btns button.danger    { background: transparent; color: #d9534f; border: 1px solid #d9534f; }
         .action-btns button.danger:hover { background: #d9534f; color: white; }
 
-        /* --- PRO MARKDOWN PREVIEW STYLING --- */
+        /* --- TOOLBAR --- */
+        .toolbar {
+            display: flex;
+            gap: 2px;
+            flex-wrap: wrap;
+            align-items: center;
+            padding: 6px 8px;
+            background: #f5f5f5;
+            border: 1px solid #ddd;
+            border-bottom: none;
+            border-radius: 6px 6px 0 0;
+        }
+        .toolbar-sep { width: 1px; height: 20px; background: #d0d0d0; margin: 0 4px; flex-shrink: 0; }
+        .btn-tool {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 3px 7px;
+            min-width: 30px;
+            height: 26px;
+            font-size: 11.5px;
+            font-weight: 700;
+            font-family: inherit;
+            cursor: pointer;
+            border: 1px solid transparent;
+            background: transparent;
+            color: #333;
+            border-radius: 4px;
+            transition: background 0.12s, border-color 0.12s;
+            white-space: nowrap;
+            line-height: 1;
+        }
+        .btn-tool:hover  { background: #e4e4e4; border-color: #bbb; }
+        .btn-tool:active { background: #d0d0d0; }
+        .btn-tool.t-italic { font-style: italic; }
+        .btn-tool.t-strike { text-decoration: line-through; }
+
+        /* --- WORKSPACE --- */
+        .workspace { width: 100%; height: 56vh; border: 1px solid #ddd; border-radius: 0 0 6px 6px; background: #fdfdfd; overflow-y: auto; box-sizing: border-box; }
+        textarea { width: 100%; height: 100%; padding: 1rem; font-family: 'Courier New', monospace; font-size: 14px; line-height: 1.6; border: none; resize: none; box-sizing: border-box; outline: none; background: transparent; }
+
+        /* --- PREVIEW --- */
         #visual-preview {
-            padding: 2rem;
+            padding: 2rem; height: 100%; box-sizing: border-box; overflow-y: auto;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-            line-height: 1.6;
-            color: #24292e;
-            background: #fff;
+            line-height: 1.6; color: #24292e; background: #fff;
         }
         #visual-preview h1, #visual-preview h2 { border-bottom: 1px solid #eaecef; padding-bottom: 0.3em; margin-top: 1.5em; font-weight: 600; }
         #visual-preview h1 { font-size: 2em; }
         #visual-preview h2 { font-size: 1.5em; }
         #visual-preview h3 { font-size: 1.25em; margin-top: 1.5em; }
-        #visual-preview p { margin-top: 0; margin-bottom: 16px; }
+        #visual-preview h4 { font-size: 1.1em;  margin-top: 1.2em; }
+        #visual-preview h5 { font-size: 1em;    margin-top: 1.2em; font-weight: 600; }
+        #visual-preview h6 { font-size: 0.9em;  margin-top: 1.2em; font-weight: 600; color: #555; }
+        #visual-preview p  { margin-top: 0; margin-bottom: 16px; }
         #visual-preview table { border-collapse: collapse; width: 100%; margin-bottom: 16px; }
         #visual-preview table th, #visual-preview table td { padding: 8px 13px; border: 1px solid #dfe2e5; }
         #visual-preview table th { background-color: #f6f8fa; font-weight: 600; text-align: left; }
         #visual-preview table tr:nth-child(2n) { background-color: #f6f8fa; }
-        #visual-preview code { padding: 0.2em 0.4em; margin: 0; font-size: 85%; background-color: rgba(27,31,35,0.05); border-radius: 3px; font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; }
+        #visual-preview code { padding: 0.2em 0.4em; font-size: 85%; background-color: rgba(27,31,35,0.05); border-radius: 3px; font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; }
         #visual-preview pre { padding: 16px; overflow: auto; font-size: 85%; line-height: 1.45; background-color: #f6f8fa; border-radius: 6px; margin-bottom: 16px; }
         #visual-preview pre code { background-color: transparent; padding: 0; }
         #visual-preview blockquote { padding: 0 1em; color: #6a737d; border-left: 0.25em solid #dfe2e5; margin: 0 0 16px 0; }
+        #visual-preview img { max-width: 100%; height: auto; border-radius: 6px; margin: 8px 0; display: block; }
+        #visual-preview .callout-important { border-left: 4px solid #e3a008; background: #fffbeb; padding: 0.75rem 1rem; margin-bottom: 16px; border-radius: 0 6px 6px 0; color: #92400e; }
+        #visual-preview .callout-note      { border-left: 4px solid #3b82f6; background: #eff6ff; padding: 0.75rem 1rem; margin-bottom: 16px; border-radius: 0 6px 6px 0; color: #1e40af; }
+
+        /* --- SAVE MODAL --- */
+        .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+        .modal-box { background: white; border-radius: 10px; padding: 1.8rem 2rem; max-width: 480px; width: 90%; box-shadow: 0 8px 32px rgba(0,0,0,0.18); }
+        .modal-box h3 { margin: 0 0 0.75rem; font-size: 1.1rem; }
+        .modal-box p  { margin: 0 0 0.5rem; font-size: 0.9rem; color: #444; line-height: 1.5; }
+        .modal-path   { font-size: 0.82rem; color: #0066cc; cursor: pointer; word-break: break-all; text-decoration: underline; font-family: monospace; }
+        .modal-path:hover { color: #0044aa; }
+        .modal-actions { display: flex; gap: 0.6rem; justify-content: flex-end; margin-top: 1.2rem; }
+        .modal-actions button { padding: 0.45rem 1rem; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 0.85rem; border: none; }
+        .btn-modal-cancel  { background: #eee; color: #333; }
+        .btn-modal-cancel:hover { background: #ddd; }
+        .btn-modal-confirm { background: #d9534f; color: white; }
+        .btn-modal-confirm:hover { background: #b52b27; }
+
+        /* Unsaved changes dot on Save button */
+        .dirty-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #e8a020; margin-left: 5px; vertical-align: middle; }
     </style>
 </head>
 <body>
 
-    <div class="card">
-        <h1>Markdown Studio</h1>
-        
-        <div id="step-upload">
-            <div class="upload-area" id="drop-zone" onclick="document.getElementById('file-input').click()">
-                <h3 style="margin-top:0;">📁 Drag & Drop a .docx or .md file</h3>
-                <p>Convert Word to Markdown using local AI, or instantly preview existing Markdown files.</p>
-                <input type="file" id="file-input" accept=".docx,.DOCX,.md,.MD,.txt" class="hidden" />
-            </div>
-        </div>
+<div class="card">
+    <h1>Markdown Studio</h1>
 
-        <div id="step-loading" class="loader hidden">
-            <h3>⏳ AI is processing your document...</h3>
-            <p>Extracting text, tables, and formatting.</p>
-        </div>
-
-        <div id="step-workspace" class="hidden">
-            <div class="editor-header">
-                <div class="tabs">
-                    <button id="btn-tab-edit" class="tab-btn active">📝 Edit Markdown</button>
-                    <button id="btn-tab-preview" class="tab-btn">👁️ Visual Preview</button>
-                </div>
-                <div class="action-btns">
-                    <button class="danger" onclick="resetApp()">Close File</button>
-                    <button id="btn-copy" class="secondary">📋 Copy</button>
-                    <button id="btn-save">💾 Save As...</button>
-                </div>
-            </div>
-            <div class="workspace">
-                <textarea id="markdown-editor"></textarea>
-                <div id="visual-preview" class="hidden"></div>
-            </div>
+    <div id="step-upload">
+        <div class="upload-area" id="drop-zone" onclick="document.getElementById('file-input').click()">
+            <h3 style="margin-top:0;">📁 Drag & Drop a .docx or .md file</h3>
+            <p>Convert Word to Markdown using local AI, or instantly preview existing Markdown files.</p>
+            <input type="file" id="file-input" accept=".docx,.DOCX,.md,.MD,.txt" class="hidden" />
         </div>
     </div>
 
-    <script>
-        const fileInput = document.getElementById('file-input');
-        const dropZone = document.getElementById('drop-zone');
-        const stepUpload = document.getElementById('step-upload');
-        const stepLoading = document.getElementById('step-loading');
-        const stepWorkspace = document.getElementById('step-workspace');
-        const markdownEditor = document.getElementById('markdown-editor');
-        const visualPreview = document.getElementById('visual-preview');
-        const btnTabEdit = document.getElementById('btn-tab-edit');
-        const btnTabPreview = document.getElementById('btn-tab-preview');
-        const btnSave = document.getElementById('btn-save');
-        const btnCopy = document.getElementById('btn-copy');
+    <div id="step-loading" class="loader hidden">
+        <h3>⏳ AI is processing your document...</h3>
+        <p>Extracting text, tables, and formatting.</p>
+    </div>
 
-        // Drag and Drop Logic
-        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
-            dropZone.addEventListener(eventName, e => { e.preventDefault(); e.stopPropagation(); }, false);
-            document.body.addEventListener(eventName, e => { e.preventDefault(); e.stopPropagation(); }, false);
-        });
-        ['dragenter', 'dragover'].forEach(eventName => dropZone.addEventListener(eventName, () => dropZone.classList.add('dragover'), false));
-        ['dragleave', 'drop'].forEach(eventName => dropZone.addEventListener(eventName, () => dropZone.classList.remove('dragover'), false));
+    <div id="step-workspace" class="hidden">
 
-        // The Smart Router: Checks if the file is DOCX or MD
-        function processFile(file) {
-            if (!file) return;
-            const fileName = file.name.toLowerCase();
-            
-            if (fileName.endsWith('.docx')) {
-                startDocxConversion(file);
-            } else if (fileName.endsWith('.md') || fileName.endsWith('.txt')) {
-                openLocalMarkdown(file);
-            } else {
-                alert("Please drop a valid .docx or .md file!");
+        <div class="editor-header">
+            <div class="tabs">
+                <button id="btn-tab-edit"    class="tab-btn active">📝 Edit Markdown</button>
+                <button id="btn-tab-preview" class="tab-btn">👁️ Visual Preview</button>
+            </div>
+            <div class="action-btns">
+                <button class="danger"           onclick="resetApp()">✕ Close</button>
+                <button id="btn-copy"            class="secondary">📋 Copy</button>
+                <button id="btn-open-folder"     class="secondary hidden">📂 Open Folder</button>
+                <button id="btn-save"            class="primary">💾 Save</button>
+            </div>
+        </div>
+
+        <div class="toolbar" id="md-toolbar">
+
+            <button class="btn-tool" title="Normal paragraph — strips heading markers" onclick="fmt('p')">¶ P</button>
+
+            <div class="toolbar-sep"></div>
+
+            <button class="btn-tool" title="Heading 1" onclick="fmt('h1')" style="font-size:13px;">H1</button>
+            <button class="btn-tool" title="Heading 2" onclick="fmt('h2')" style="font-size:12px;">H2</button>
+            <button class="btn-tool" title="Heading 3" onclick="fmt('h3')" style="font-size:11.5px;">H3</button>
+            <button class="btn-tool" title="Heading 4" onclick="fmt('h4')" style="font-size:11px;">H4</button>
+            <button class="btn-tool" title="Heading 5" onclick="fmt('h5')" style="font-size:10.5px;">H5</button>
+            <button class="btn-tool" title="Heading 6" onclick="fmt('h6')" style="font-size:10px; color:#777;">H6</button>
+
+            <div class="toolbar-sep"></div>
+
+            <button class="btn-tool"           title="Bold"          onclick="fmt('bold')"><b>B</b></button>
+            <button class="btn-tool t-italic"  title="Italic"        onclick="fmt('italic')">I</button>
+            <button class="btn-tool t-strike"  title="Strikethrough" onclick="fmt('strike')">S</button>
+            <button class="btn-tool"            title="Inline code"   onclick="fmt('code-inline')" style="font-family:monospace;">`c`</button>
+
+            <div class="toolbar-sep"></div>
+
+            <button class="btn-tool" title="Bullet list"  onclick="fmt('ul')">• List</button>
+            <button class="btn-tool" title="Blockquote"   onclick="fmt('quote')">" Quote</button>
+            <button class="btn-tool" title="Code block"   onclick="fmt('code-block')" style="font-family:monospace;">{ }</button>
+            <button class="btn-tool" title="Insert table" onclick="fmt('table')">⊞ Table</button>
+
+            <div class="toolbar-sep"></div>
+
+            <button class="btn-tool" title="Insert link"  onclick="fmt('link')">🔗 Link</button>
+            <button class="btn-tool" title="Insert image" onclick="fmt('image')">🖼 Image</button>
+
+            <div class="toolbar-sep"></div>
+
+            <button class="btn-tool" title="Important callout" onclick="fmt('important')" style="color:#b45309;">⚠ Important</button>
+            <button class="btn-tool" title="Note callout"      onclick="fmt('note')"      style="color:#1d4ed8;">📝 Note</button>
+        </div>
+
+        <div class="workspace">
+            <textarea id="markdown-editor" spellcheck="false"></textarea>
+            <div id="visual-preview" class="hidden"></div>
+        </div>
+    </div>
+</div>
+
+<div id="save-modal" class="modal-backdrop hidden">
+    <div class="modal-box">
+        <h3 id="modal-title">💾 File already saved on disk</h3>
+        <p id="modal-desc">This document was saved automatically during conversion. The current location is:</p>
+        <p><span class="modal-path" id="modal-path" onclick="openFolder()"></span></p>
+        <p id="modal-warn" style="margin-top:0.8rem;">Proceeding will <strong>overwrite</strong> the original file with your current edits. Continue?</p>
+        <div class="modal-actions">
+            <button class="btn-modal-cancel"  id="modal-btn-cancel"  onclick="closeModal()">Cancel</button>
+            <button class="btn-modal-confirm" id="modal-btn-confirm" onclick="confirmSave()">Yes, overwrite</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    // ── Refs ──────────────────────────────────────────────────────────────────
+    const fileInput      = document.getElementById('file-input');
+    const dropZone       = document.getElementById('drop-zone');
+    const stepUpload     = document.getElementById('step-upload');
+    const stepLoading    = document.getElementById('step-loading');
+    const stepWorkspace  = document.getElementById('step-workspace');
+    const markdownEditor = document.getElementById('markdown-editor');
+    const visualPreview  = document.getElementById('visual-preview');
+    const btnTabEdit     = document.getElementById('btn-tab-edit');
+    const btnTabPreview  = document.getElementById('btn-tab-preview');
+    const btnSave        = document.getElementById('btn-save');
+    const btnCopy        = document.getElementById('btn-copy');
+    const btnOpenFolder  = document.getElementById('btn-open-folder');
+    const mdToolbar      = document.getElementById('md-toolbar');
+    const saveModal      = document.getElementById('save-modal');
+    const modalPath      = document.getElementById('modal-path');
+    const modalTitle     = document.getElementById('modal-title');
+    const modalDesc      = document.getElementById('modal-desc');
+    const modalWarn      = document.getElementById('modal-warn');
+    const modalBtnCancel = document.getElementById('modal-btn-cancel');
+
+    // ── App state ─────────────────────────────────────────────────────────────
+    let currentFileName = null;   // sanitized doc_name (used for save-changes call)
+    let serverSavedPath = null;   // display path shown in modal
+    let isServerDoc     = false;  // did this come from a .docx conversion?
+    let isDirty         = false;  // editor has unsaved edits?
+
+    // ── Dirty tracking ────────────────────────────────────────────────────────
+    markdownEditor.addEventListener('input', () => {
+        if (!isDirty) {
+            isDirty = true;
+            if (!btnSave.querySelector('.dirty-dot')) {
+                const dot = document.createElement('span');
+                dot.className = 'dirty-dot';
+                dot.title = 'Unsaved changes';
+                btnSave.appendChild(dot);
             }
         }
+    });
 
-        dropZone.addEventListener('drop', e => processFile(e.dataTransfer.files[0]));
-        fileInput.addEventListener('change', e => processFile(e.target.files[0]));
+    function clearDirty() {
+        isDirty = false;
+        const dot = btnSave.querySelector('.dirty-dot');
+        if (dot) dot.remove();
+    }
 
-        // Path A: The Python AI Converter (For .docx)
-        function startDocxConversion(file) {
-            stepUpload.classList.add('hidden');
-            stepLoading.classList.remove('hidden');
-            
-            const formData = new FormData();
-            formData.append("file", file);
+    // ── Drag & Drop ───────────────────────────────────────────────────────────
+    ['dragenter','dragover','dragleave','drop'].forEach(ev => {
+        dropZone.addEventListener(ev, e => { e.preventDefault(); e.stopPropagation(); });
+        document.body.addEventListener(ev, e => { e.preventDefault(); e.stopPropagation(); });
+    });
+    ['dragenter','dragover'].forEach(ev => dropZone.addEventListener(ev, () => dropZone.classList.add('dragover')));
+    ['dragleave','drop'].forEach(ev     => dropZone.addEventListener(ev, () => dropZone.classList.remove('dragover')));
 
-            fetch("http://127.0.0.1:8000/api/convert", {
-                method: "POST",
-                body: formData
-            })
-            .then(response => {
-                if (!response.ok) throw new Error("Network response was not ok. Is the Python server running?");
-                return response.json();
-            })
+    // ── File router ───────────────────────────────────────────────────────────
+    function processFile(file) {
+        if (!file) return;
+        const name = file.name.toLowerCase();
+        if (name.endsWith('.docx'))                             startDocxConversion(file);
+        else if (name.endsWith('.md') || name.endsWith('.txt')) openLocalMarkdown(file);
+        else alert("Please drop a valid .docx or .md file!");
+    }
+    dropZone.addEventListener('drop', e => processFile(e.dataTransfer.files[0]));
+    fileInput.addEventListener('change', e => processFile(e.target.files[0]));
+
+    // ── Path A: DOCX → Server Conversion ─────────────────────────────────────
+    function startDocxConversion(file) {
+        stepUpload.classList.add('hidden');
+        stepLoading.classList.remove('hidden');
+
+        const formData = new FormData();
+        formData.append("file", file);
+
+        fetch("/api/convert", { method: "POST", body: formData })
+            .then(r => { if (!r.ok) throw new Error("Server error. Is the Python server running?"); return r.json(); })
             .then(data => {
                 if (data.error) throw new Error(data.error);
+
                 markdownEditor.value = data.markdown;
+                currentFileName = data.doc_name;
+                serverSavedPath = data.folder_created
+                    ? data.folder_created + '\\' + data.doc_name + '.md'
+                    : 'Server Outputs folder';
+                isServerDoc = true;
+                clearDirty();
+
                 stepLoading.classList.add('hidden');
                 stepWorkspace.classList.remove('hidden');
-                window.currentFileName = file.name.replace(/\.[^/.]+$/, "");
-                
-                // Switch to edit tab by default for conversions
-                btnTabEdit.click(); 
+                btnOpenFolder.classList.remove('hidden');
+                btnTabEdit.click();
+                updatePreview(); // Sync preview immediately
             })
-            .catch(err => { 
-                alert("Conversion failed. Details: " + err.message); 
-                resetApp(); 
-            });
-        }
+            .catch(err => { alert("Conversion failed: " + err.message); resetApp(); });
+    }
 
-        // Path B: The Instant Local Viewer (For .md)
-        function openLocalMarkdown(file) {
-            const reader = new FileReader();
-            
-            reader.onload = function(e) {
-                // Instantly load the text into the editor
-                markdownEditor.value = e.target.result;
-                window.currentFileName = file.name.replace(/\.[^/.]+$/, "");
-                
-                // Hide upload screen, show workspace
-                stepUpload.classList.add('hidden');
-                stepWorkspace.classList.remove('hidden');
-                
-                // Automatically click the Preview tab for immediate reading
-                btnTabPreview.click();
-            };
-            
-            reader.onerror = function() {
-                alert("Error reading the file from your computer.");
-            };
-            
-            // Tell the browser to read the file as plain text
-            reader.readAsText(file);
-        }
+    // ── Path B: Local .md file ────────────────────────────────────────────────
+    function openLocalMarkdown(file) {
+        const reader = new FileReader();
+        reader.onload = e => {
+            markdownEditor.value = e.target.result;
+            currentFileName = file.name.replace(/\.[^/.]+$/, "");
+            serverSavedPath = null;
+            isServerDoc     = false;
+            clearDirty();
 
-        // Tab Logic
-        btnTabPreview.addEventListener('click', () => {
-            btnTabEdit.classList.remove('active'); btnTabPreview.classList.add('active');
-            markdownEditor.classList.add('hidden'); visualPreview.classList.remove('hidden');
-            visualPreview.innerHTML = marked.parse(markdownEditor.value);
-        });
+            stepUpload.classList.add('hidden');
+            stepWorkspace.classList.remove('hidden');
+            btnOpenFolder.classList.add('hidden');
+            btnTabPreview.click();
+        };
+        reader.onerror = () => alert("Error reading the file.");
+        reader.readAsText(file);
+    }
 
-        btnTabEdit.addEventListener('click', () => {
-            btnTabPreview.classList.remove('active'); btnTabEdit.classList.add('active');
-            visualPreview.classList.add('hidden'); markdownEditor.classList.remove('hidden');
-        });
+    // ── Tabs ──────────────────────────────────────────────────────────────────
+    btnTabPreview.addEventListener('click', () => {
+        btnTabEdit.classList.remove('active');
+        btnTabPreview.classList.add('active');
+        markdownEditor.classList.add('hidden');
+        mdToolbar.classList.add('hidden');
+        visualPreview.classList.remove('hidden');
+        updatePreview(); // renamed from renderPreview
+    });
 
-        // Copy to Clipboard Logic
-        btnCopy.addEventListener('click', () => {
-            navigator.clipboard.writeText(markdownEditor.value).then(() => {
-                const originalText = btnCopy.innerHTML;
-                btnCopy.innerHTML = "✅ Copied!";
-                setTimeout(() => { btnCopy.innerHTML = originalText; }, 2000);
-            }).catch(err => {
-                alert("Failed to copy text: " + err);
-            });
-        });
+    btnTabEdit.addEventListener('click', () => {
+        btnTabPreview.classList.remove('active');
+        btnTabEdit.classList.add('active');
+        visualPreview.classList.add('hidden');
+        markdownEditor.classList.remove('hidden');
+        mdToolbar.classList.remove('hidden');
+    });
 
-        // Save Logic (Native File Picker)
-        btnSave.addEventListener('click', async function() {
-            const textToSave = markdownEditor.value;
-            if (window.showSaveFilePicker) {
-                try {
-                    const fileHandle = await window.showSaveFilePicker({
-                        suggestedName: (window.currentFileName || "document") + ".md",
-                        types: [{ description: 'Markdown File', accept: { 'text/markdown': ['.md'] } }],
-                    });
-                    const writable = await fileHandle.createWritable();
-                    await writable.write(textToSave);
-                    await writable.close();
-                } catch (err) { if (err.name !== 'AbortError') alert("An error occurred while saving."); }
-            } else {
-                const blob = new Blob([textToSave], { type: "text/markdown;charset=utf-8" });
-                const link = document.createElement("a");
-                link.href = URL.createObjectURL(blob);
-                link.download = (window.currentFileName || "document") + ".md";
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
+    // ── UPDATED PREVIEW FUNCTION ──────────────────────────────────────────────
+    function updatePreview() {
+    marked.setOptions({ gfm: true, breaks: true });
+    
+    // Get the raw text from the editor
+    let md = markdownEditor.value;
+
+    // --- THE PORTABILITY FIX ---
+    // This looks for "Images/" and tells the browser to look in "/Outputs/Images/"
+    // This allows your MD file to stay GitHub-ready (using relative paths)
+    // but makes it work locally in your converter tool.
+    md = md.replace(/\(Images\//g, '(/Outputs/Images/');
+
+    let html = marked.parse(md);
+
+    // Callout Logic (kept exactly as you have it)
+    html = html.replace(/<blockquote>\s*<p>\[!IMPORTANT\]([\s\S]*?)<\/p>\s*<\/blockquote>/gi,
+        (_, b) => `<div class="callout-important"><strong>⚠ Important</strong><br>${b.trim()}</div>`);
+    html = html.replace(/<blockquote>\s*<p>\[!NOTE\]([\s\S]*?)<\/p>\s*<\/blockquote>/gi,
+        (_, b) => `<div class="callout-note"><strong>📝 Note</strong><br>${b.trim()}</div>`);
+
+    visualPreview.innerHTML = html;
+    if (window.Prism) Prism.highlightAllUnder(visualPreview);
+}
+
+
+    // ── Toolbar ───────────────────────────────────────────────────────────────
+    function fmt(type) {
+        const ta     = markdownEditor;
+        const start = ta.selectionStart;
+        const end   = ta.selectionEnd;
+        const sel   = ta.value.substring(start, end);
+
+        const stripHeading = t => t.replace(/^#{1,6}\s*/, '').trim();
+        const prefixLines  = prefix => (sel || 'text').split('\n').map(l => prefix + l).join('\n');
+
+        let out = '';
+        let cursorBias = 0;
+
+        switch (type) {
+            case 'p':  out = stripHeading(sel) || 'Paragraph text'; break;
+            case 'h1': out = `# ${stripHeading(sel) || 'Heading 1'}`; break;
+            case 'h2': out = `## ${stripHeading(sel) || 'Heading 2'}`; break;
+            case 'h3': out = `### ${stripHeading(sel) || 'Heading 3'}`; break;
+            case 'h4': out = `#### ${stripHeading(sel) || 'Heading 4'}`; break;
+            case 'h5': out = `##### ${stripHeading(sel) || 'Heading 5'}`; break;
+            case 'h6': out = `###### ${stripHeading(sel) || 'Heading 6'}`; break;
+            case 'bold':         out = `**${sel || 'bold text'}**`;     cursorBias = sel ? 0 : -2; break;
+            case 'italic':       out = `*${sel || 'italic text'}*`;      cursorBias = sel ? 0 : -1; break;
+            case 'strike':       out = `~~${sel || 'strikethrough'}~~`; cursorBias = sel ? 0 : -2; break;
+            case 'code-inline': out = `\`${sel || 'code'}\``;           cursorBias = sel ? 0 : -1; break;
+            case 'ul':          out = prefixLines('- '); break;
+            case 'quote':       out = prefixLines('> '); break;
+            case 'code-block': out = `\n\`\`\`\n${sel || 'code here'}\n\`\`\`\n`; break;
+            case 'table':       out = `\n| Column 1 | Column 2 | Column 3 |\n|---|---|---|\n| Row 1 | Data | Data |\n| Row 2 | Data | Data |\n`; break;
+            case 'link': {
+                const isUrl = sel.startsWith('http');
+                out = `[${isUrl ? 'link text' : (sel || 'link text')}](${isUrl ? sel : 'https://'})`;
+                break;
             }
-        });
-
-        function resetApp() {
-            fileInput.value = ''; markdownEditor.value = ''; visualPreview.innerHTML = '';
-            btnTabEdit.click(); stepWorkspace.classList.add('hidden'); stepLoading.classList.add('hidden'); stepUpload.classList.remove('hidden');
+            case 'image': {
+                const imgUrl = sel.startsWith('http') ? sel : (prompt('Image URL:') || 'https://example.com/image.png');
+                out = `![image](${imgUrl})`;
+                break;
+            }
+            case 'important': out = `\n> [!IMPORTANT]\n> ${sel || 'Important note here'}\n`; break;
+            case 'note':      out = `\n> [!NOTE]\n> ${sel || 'Note here'}\n`; break;
+            default: return;
         }
-    </script>
+
+        ta.focus();
+        ta.setRangeText(out, start, end, 'end');
+        if (!sel && cursorBias !== 0) {
+            const pos = ta.selectionStart + cursorBias;
+            ta.setSelectionRange(pos, pos);
+        }
+        ta.dispatchEvent(new Event('input')); 
+        updatePreview(); // Keep preview in sync
+    }
+
+    // ── Copy ──────────────────────────────────────────────────────────────────
+    btnCopy.addEventListener('click', () => {
+        navigator.clipboard.writeText(markdownEditor.value).then(() => {
+            const orig = btnCopy.innerHTML;
+            btnCopy.innerHTML = "✅ Copied!";
+            setTimeout(() => { btnCopy.innerHTML = orig; }, 2000);
+        });
+    });
+
+    // ── Open Folder ───────────────────────────────────────────────────────────
+    function openFolder() {
+        fetch('/api/open-folder').catch(() => {});
+    }
+    btnOpenFolder.addEventListener('click', () => {
+        openFolder();
+        const orig = btnOpenFolder.innerHTML;
+        btnOpenFolder.innerHTML = "✅ Opened!";
+        setTimeout(() => { btnOpenFolder.innerHTML = orig; }, 2000);
+    });
+
+    // ── Save ──────────────────────────────────────────────────────────────────
+    btnSave.addEventListener('click', () => {
+        if (isServerDoc && serverSavedPath) {
+            modalPath.textContent = serverSavedPath;
+            if (isDirty) {
+                modalTitle.textContent       = '💾 Overwrite saved file?';
+                modalDesc.textContent        = 'This document is already saved on disk at:';
+                modalWarn.style.display      = '';
+                modalBtnCancel.style.display = '';
+                document.getElementById('modal-btn-confirm').textContent = 'Yes, overwrite';
+                document.getElementById('modal-btn-confirm').onclick     = confirmSave;
+            } else {
+                modalTitle.textContent       = '✅ File is already saved';
+                modalDesc.textContent        = 'No changes detected. The file is saved at:';
+                modalWarn.style.display      = 'none';
+                modalBtnCancel.style.display = 'none';
+                document.getElementById('modal-btn-confirm').textContent = 'OK';
+                document.getElementById('modal-btn-confirm').onclick     = closeModal;
+            }
+            saveModal.classList.remove('hidden');
+        } else {
+            doLocalSave();
+        }
+    });
+
+    function closeModal() {
+        saveModal.classList.add('hidden');
+    }
+
+    function confirmSave() {
+        closeModal();
+        fetch('/api/save-changes', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ doc_name: currentFileName, markdown: markdownEditor.value })
+        })
+        .then(r => { if (!r.ok) throw new Error("Server error"); return r.json(); })
+        .then(() => {
+            clearDirty();
+            const orig = btnSave.innerHTML;
+            btnSave.innerHTML = "✅ Saved!";
+            setTimeout(() => { btnSave.innerHTML = '💾 Save'; }, 2000);
+        })
+        .catch(() => alert("Failed to save to server. Is the server running?"));
+    }
+
+    function doLocalSave() {
+        const text = markdownEditor.value;
+        const name = (currentFileName || "document") + ".md";
+        if (window.showSaveFilePicker) {
+            window.showSaveFilePicker({
+                suggestName: name,
+                types: [{ description: 'Markdown File', accept: { 'text/markdown': ['.md'] } }],
+            }).then(async fh => {
+                const w = await fh.createWritable();
+                await w.write(text);
+                await w.close();
+                clearDirty();
+            }).catch(err => { if (err.name !== 'AbortError') alert("Error saving file."); });
+        } else {
+            const blob = new Blob([text], { type: "text/markdown;charset=utf-8" });
+            const a = document.createElement("a");
+            a.href = URL.createObjectURL(blob);
+            a.download = name;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            clearDirty();
+        }
+    }
+
+    // ── Reset ─────────────────────────────────────────────────────────────────
+    function resetApp() {
+        fileInput.value         = '';
+        markdownEditor.value    = '';
+        visualPreview.innerHTML = '';
+        currentFileName = null;
+        serverSavedPath = null;
+        isServerDoc     = false;
+        clearDirty();
+        btnOpenFolder.classList.add('hidden');
+        btnTabEdit.click();
+        stepWorkspace.classList.add('hidden');
+        stepLoading.classList.add('hidden');
+        stepUpload.classList.remove('hidden');
+    }
+</script>
 </body>
 </html>
