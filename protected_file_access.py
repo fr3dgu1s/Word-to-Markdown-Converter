@@ -8,7 +8,7 @@ import uuid
 import zipfile
 import base64
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 
 try:
     import pythoncom  # type: ignore
@@ -25,11 +25,151 @@ class ProtectedFileAccessError(Exception):
 WD_ALERTS_NONE = 0
 WD_FORMAT_XML_DOCUMENT = 16
 MsoAutomationSecurityForceDisable = 3
+WD_INFO_WITHIN_TABLE = 12
 
 
 _IDENTITY_CACHE_SECONDS = 600
 _identity_cache: Optional[Dict[str, str]] = None
 _identity_cache_ts = 0.0
+
+
+def _clean_word_text(value: str) -> str:
+    return (value or "").replace("\r", "").replace("\x07", "").replace("\x0b", "").strip()
+
+
+def _style_name(paragraph: Any) -> str:
+    try:
+        style = paragraph.Range.Style
+        return str(getattr(style, "NameLocal", style) or "")
+    except Exception:
+        return ""
+
+
+def _to_bool(flag: Any) -> bool:
+    try:
+        return int(flag) != 0
+    except Exception:
+        return bool(flag)
+
+
+def _iter_format_runs(para_range: Any):
+    """Yield range-like chunks for inline formatting, preferring Runs when available."""
+    runs = getattr(para_range, "Runs", None)
+    try:
+        run_count = int(getattr(runs, "Count", 0)) if runs is not None else 0
+    except Exception:
+        run_count = 0
+
+    if run_count > 0:
+        for idx in range(1, run_count + 1):
+            yield runs.Item(idx)
+        return
+
+    words = para_range.Words
+    word_count = int(words.Count)
+    for idx in range(1, word_count + 1):
+        yield words.Item(idx)
+
+
+def _build_inline_markdown_from_runs(paragraph: Any) -> str:
+    parts: list[str] = []
+    for run in _iter_format_runs(paragraph.Range):
+        text = (getattr(run, "Text", "") or "").replace("\r", "").replace("\x07", "").replace("\x0b", "")
+        if not text:
+            continue
+
+        if not text.strip():
+            parts.append(text)
+            continue
+
+        bold = _to_bool(getattr(run.Font, "Bold", 0))
+        italic = _to_bool(getattr(run.Font, "Italic", 0))
+
+        if bold and italic:
+            parts.append(f"***{text.strip()}***")
+        elif bold:
+            parts.append(f"**{text.strip()}**")
+        elif italic:
+            parts.append(f"*{text.strip()}*")
+        else:
+            parts.append(text)
+
+    return "".join(parts).strip()
+
+
+def _paragraph_to_markdown(paragraph: Any) -> str:
+    style_name = _style_name(paragraph)
+    style_lower = style_name.lower()
+
+    plain_text = _clean_word_text(getattr(paragraph.Range, "Text", ""))
+    if not plain_text:
+        return ""
+
+    if style_lower.startswith("heading "):
+        try:
+            level = int(style_lower.split("heading ", 1)[1].strip().split()[0])
+        except Exception:
+            level = 1
+        level = max(1, min(level, 6))
+        return f"{'#' * level} {plain_text}"
+
+    if "code" in style_lower or "preformat" in style_lower:
+        return f"```\n{plain_text}\n```"
+
+    if "quote" in style_lower or "block text" in style_lower:
+        quoted = "\n".join(f"> {line}" if line else ">" for line in plain_text.splitlines())
+        return quoted
+
+    list_level = 1
+    try:
+        list_level = int(paragraph.Range.ListFormat.ListLevelNumber or 1)
+    except Exception:
+        list_level = 1
+    list_indent = "  " * max(list_level - 1, 0)
+
+    inline_text = _build_inline_markdown_from_runs(paragraph)
+    if not inline_text:
+        inline_text = plain_text
+
+    if "list bullet" in style_lower:
+        return f"{list_indent}- {inline_text}"
+    if "list number" in style_lower:
+        return f"{list_indent}1. {inline_text}"
+
+    return inline_text
+
+
+def _escape_markdown_table_cell(cell_text: str) -> str:
+    return cell_text.replace("|", "\\|").replace("\n", "<br>")
+
+
+def _table_to_markdown(table: Any) -> str:
+    rows = []
+    for row_idx in range(1, int(table.Rows.Count) + 1):
+        cells = []
+        row = table.Rows.Item(row_idx)
+        for cell_idx in range(1, int(row.Cells.Count) + 1):
+            cell = row.Cells.Item(cell_idx)
+            cell_text = _clean_word_text(getattr(cell.Range, "Text", ""))
+            cells.append(_escape_markdown_table_cell(cell_text))
+        rows.append(cells)
+
+    if not rows:
+        return ""
+
+    header = rows[0]
+    header_line = "| " + " | ".join(header) + " |"
+    separator = "| " + " | ".join(["---"] * len(header)) + " |"
+
+    body_lines = []
+    for row in rows[1:]:
+        if len(row) < len(header):
+            row += [""] * (len(header) - len(row))
+        elif len(row) > len(header):
+            row = row[: len(header)]
+        body_lines.append("| " + " | ".join(row) + " |")
+
+    return "\n".join([header_line, separator, *body_lines])
 
 
 def _az_command_candidates() -> list[list[str]]:
@@ -289,6 +429,126 @@ def cleanup_temporary_decrypted_file(temp_docx_path: str | Path) -> None:
     temp_path = Path(temp_docx_path)
     if temp_path.exists():
         temp_path.unlink(missing_ok=True)
+
+
+def convert_protected_docx_to_md(docx_path: str) -> str:
+    """Convert a protected .docx to Markdown directly from Word COM in-memory objects."""
+    source_path = Path(docx_path).expanduser().resolve()
+    if not source_path.exists():
+        raise RuntimeError(f"Protected conversion failed: file not found: {source_path}")
+    if source_path.suffix.lower() != ".docx":
+        raise RuntimeError(f"Protected conversion failed: expected .docx input, got: {source_path.name}")
+    if win32com is None or pythoncom is None:
+        raise RuntimeError(
+            "Protected conversion failed: pywin32 is required. "
+            "Install with `pip install pywin32` and ensure Microsoft Word is installed."
+        )
+
+    word = None
+    doc = None
+    com_initialized = False
+
+    try:
+        pythoncom.CoInitialize()
+        com_initialized = True
+
+        try:
+            word = win32com.client.DispatchEx("Word.Application")
+        except Exception as exc:
+            raise RuntimeError(
+                "Protected conversion failed: could not initialize Word COM automation."
+            ) from exc
+
+        word.Visible = False
+        word.DisplayAlerts = WD_ALERTS_NONE
+        try:
+            word.AutomationSecurity = MsoAutomationSecurityForceDisable
+        except Exception:
+            pass
+
+        try:
+            doc = word.Documents.Open(
+                str(source_path),
+                ReadOnly=True,
+                ConfirmConversions=False,
+                AddToRecentFiles=False,
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                "Protected conversion failed: Word could not open/decrypt the document "
+                "with the current user session (possible rights/policy/authentication issue)."
+            ) from exc
+
+        markdown_blocks: list[str] = []
+        processed_table_starts: set[int] = set()
+
+        for idx in range(1, int(doc.Content.Paragraphs.Count) + 1):
+            para = doc.Content.Paragraphs.Item(idx)
+
+            within_table = False
+            try:
+                within_table = bool(para.Range.Information(WD_INFO_WITHIN_TABLE))
+            except Exception:
+                within_table = False
+
+            if within_table:
+                try:
+                    table = para.Range.Tables.Item(1)
+                    table_start = int(table.Range.Start)
+                except Exception:
+                    table = None
+                    table_start = -1
+
+                if table is not None and table_start not in processed_table_starts:
+                    processed_table_starts.add(table_start)
+                    table_md = _table_to_markdown(table)
+                    if table_md:
+                        markdown_blocks.append(table_md)
+                continue
+
+            para_md = _paragraph_to_markdown(para)
+            if para_md:
+                markdown_blocks.append(para_md)
+
+        return "\n\n".join(markdown_blocks).strip()
+    except RuntimeError:
+        raise
+    except Exception as exc:
+        raise RuntimeError(f"Protected conversion failed unexpectedly: {exc}") from exc
+    finally:
+        if doc is not None:
+            try:
+                doc.Close(SaveChanges=False)
+            except Exception:
+                pass
+        if word is not None:
+            try:
+                word.Quit()
+            except Exception:
+                pass
+        if com_initialized:
+            try:
+                pythoncom.CoUninitialize()
+            except Exception:
+                pass
+
+
+def convert_docx_with_docling_fallback(
+    docx_path: str,
+    docling_to_markdown: Callable[[str], str],
+) -> str:
+    """Try Docling first; on failure, fall back to Word COM protected conversion."""
+    try:
+        return docling_to_markdown(docx_path)
+    except Exception as docling_exc:
+        try:
+            return convert_protected_docx_to_md(docx_path)
+        except Exception as protected_exc:
+            raise RuntimeError(
+                "Both conversion paths failed. "
+                f"Docling error: {docling_exc}. "
+                f"Protected fallback error: {protected_exc}"
+            ) from protected_exc
 
 
 def decrypt_and_get_temp_path(protected_docx_path: str) -> str:

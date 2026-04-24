@@ -12,8 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
 from protected_file_access import (
-    ensure_accessible_docx,
-    export_accessible_copy_via_word,
+    convert_docx_with_docling_fallback,
     ProtectedFileAccessError,
     run_protected_access_diagnostics,
     test_protected_file_access,
@@ -101,7 +100,6 @@ def convert_file_to_markdown(
     spec_image_folder.mkdir(parents=True, exist_ok=True)
 
     tmp_path: Optional[Path] = None
-    accessible_tmp_path: Optional[Path] = None
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp:
             shutil.copyfileobj(upload_file.file, tmp)
@@ -109,39 +107,26 @@ def convert_file_to_markdown(
 
         from docling_core.types.doc import PictureItem  # noqa: PLC0415  (lazy after init)
 
-        # Try direct conversion first; fall back to Word COM export for DLP/IRM-protected files.
-        try:
-            conv_res = _get_converter().convert(tmp_path)
-        except Exception as direct_exc:
-            try:
-                accessible_path = export_accessible_copy_via_word(tmp_path)
-                accessible_tmp_path = accessible_path
-                conv_res = _get_converter().convert(accessible_path)
-            except ProtectedFileAccessError as word_exc:
-                raise RuntimeError(
-                    f"Direct conversion failed ({direct_exc}). "
-                    f"Word COM export also failed: {word_exc}"
-                ) from direct_exc
-            except Exception as word_exc:
-                raise RuntimeError(
-                    f"Direct conversion failed ({direct_exc}). "
-                    f"Word COM re-save also failed: {word_exc}"
-                ) from direct_exc
+        def _docling_to_markdown(path: str) -> str:
+            conv_res = _get_converter().convert(Path(path))
 
-        picture_counter = 0
-        for element, _level in conv_res.document.iterate_items():
-            if isinstance(element, PictureItem):
-                picture_counter += 1
-                img_name = f"image_{picture_counter}.png"
-                img_path = spec_image_folder / img_name
-                with img_path.open("wb") as fp:
-                    element.get_image(conv_res.document).save(fp, "PNG")
+            picture_counter = 0
+            for element, _level in conv_res.document.iterate_items():
+                if isinstance(element, PictureItem):
+                    picture_counter += 1
+                    img_name = f"image_{picture_counter}.png"
+                    img_path = spec_image_folder / img_name
+                    with img_path.open("wb") as fp:
+                        element.get_image(conv_res.document).save(fp, "PNG")
 
-        raw_markdown = conv_res.document.export_to_markdown(image_placeholder="IMAGE_TOKEN")
-        final_markdown = raw_markdown
-        for i in range(1, picture_counter + 1):
-            tag = f"![spec-image](Images/{safe_name}/image_{i}.png)"
-            final_markdown = final_markdown.replace("IMAGE_TOKEN", tag, 1)
+            raw_markdown = conv_res.document.export_to_markdown(image_placeholder="IMAGE_TOKEN")
+            final_md = raw_markdown
+            for i in range(1, picture_counter + 1):
+                tag = f"![spec-image](Images/{safe_name}/image_{i}.png)"
+                final_md = final_md.replace("IMAGE_TOKEN", tag, 1)
+            return final_md
+
+        final_markdown = convert_docx_with_docling_fallback(str(tmp_path), _docling_to_markdown)
 
         md_file_path = OUTPUTS_ROOT / f"{safe_name}.md"
         with open(md_file_path, "w", encoding="utf-8") as f:
@@ -156,8 +141,6 @@ def convert_file_to_markdown(
 
         return result
     finally:
-        if accessible_tmp_path and accessible_tmp_path.exists():
-            accessible_tmp_path.unlink(missing_ok=True)
         if tmp_path and tmp_path.exists():
             tmp_path.unlink(missing_ok=True)
 
