@@ -7,12 +7,15 @@ from urllib.error import URLError
 from urllib.request import urlopen
 
 APP_URL = "http://127.0.0.1:8000"
-HEALTH_TIMEOUT_SECONDS = 20
+HEALTH_URL = f"{APP_URL}/health"
+HEALTH_TIMEOUT_SECONDS = 45   # generous ceiling; server typically responds in 1-3 s
+_PROBE_CONNECT_TIMEOUT = 0.4  # keep each probe short so we detect readiness fast
+_POLL_INTERVAL = 0.2          # check every 200 ms
 
 
 def _can_reach_server() -> bool:
     try:
-        with urlopen(APP_URL, timeout=1.5) as response:
+        with urlopen(HEALTH_URL, timeout=_PROBE_CONNECT_TIMEOUT) as response:
             return 200 <= response.status < 500
     except URLError:
         return False
@@ -54,18 +57,22 @@ def _wait_until_ready(timeout_seconds: int) -> bool:
     while time.time() - started_at < timeout_seconds:
         if _can_reach_server():
             return True
-        time.sleep(0.5)
+        time.sleep(_POLL_INTERVAL)
     return False
 
 
 def main() -> None:
     repo_root = Path(__file__).resolve().parent
 
-    if not _can_reach_server():
+    already_up = _can_reach_server()
+    if not already_up:
         _start_server_process(repo_root)
-        _wait_until_ready(HEALTH_TIMEOUT_SECONDS)
+        already_up = _wait_until_ready(HEALTH_TIMEOUT_SECONDS)
 
-    if _can_reach_server():
+    # Open the browser as soon as the HTTP server is up.
+    # Docling continues warming up in the background while the user
+    # navigates to the upload page — by the time they select a file it is ready.
+    if already_up:
         webbrowser.open(APP_URL)
 
 

@@ -11,13 +11,46 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
-# --- STABLE DOCLING IMPORTS ---
-from docling.document_converter import DocumentConverter
-from docling.datamodel.pipeline_options import PdfPipelineOptions
-from docling_core.types.doc import PictureItem
 from protected_file_access import ensure_accessible_docx, ProtectedFileAccessError
 
 app = FastAPI()
+
+# ---------------------------------------------------------------------------
+# Docling is loaded lazily in a background thread so the HTTP server is
+# reachable within ~1 second of launch. Conversion endpoints wait if the
+# converter is not yet ready (usually it finishes before a user can upload).
+# ---------------------------------------------------------------------------
+_converter_ready = threading.Event()
+_converter = None          # set by _init_converter()
+_converter_error = None    # set if import/init fails
+
+
+def _init_converter() -> None:
+    global _converter, _converter_error
+    try:
+        from docling.document_converter import DocumentConverter  # noqa: PLC0415
+        from docling.datamodel.pipeline_options import PdfPipelineOptions  # noqa: PLC0415
+        opts = PdfPipelineOptions()
+        opts.generate_picture_images = True
+        opts.images_scale = 2.0
+        _converter = DocumentConverter()
+    except Exception as exc:
+        _converter_error = str(exc)
+    finally:
+        _converter_ready.set()
+
+
+threading.Thread(target=_init_converter, daemon=True, name="docling-init").start()
+
+
+def _get_converter():
+    """Block until converter is ready then return it (or raise on init failure)."""
+    _converter_ready.wait(timeout=120)
+    if _converter_error:
+        raise RuntimeError(f"Document converter failed to initialise: {_converter_error}")
+    if _converter is None:
+        raise RuntimeError("Document converter is not available.")
+    return _converter
 
 # 1. DIRECTORY CONFIG
 BASE_DIR = Path("C:/temp/Word-to-MD-App")
@@ -51,11 +84,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-pipeline_options = PdfPipelineOptions()
-pipeline_options.generate_picture_images = True
-pipeline_options.images_scale = 2.0
-converter = DocumentConverter()
-
 
 def convert_file_to_markdown(
     upload_file: UploadFile,
@@ -78,7 +106,9 @@ def convert_file_to_markdown(
         if generated_copy:
             accessible_tmp_path = source_path
 
-        conv_res = converter.convert(source_path)
+        from docling_core.types.doc import PictureItem  # noqa: PLC0415  (lazy after init)
+
+        conv_res = _get_converter().convert(source_path)
 
         picture_counter = 0
         for element, _level in conv_res.document.iterate_items():
@@ -115,9 +145,26 @@ def convert_file_to_markdown(
         if tmp_path and tmp_path.exists():
             tmp_path.unlink(missing_ok=True)
 
+@app.get("/health")
+async def health_check():
+    """Lightweight liveness probe used by the launcher."""
+    return {"ok": True}
+
+
+@app.get("/api/status")
+async def converter_status():
+    """Lets the UI show when the document engine is still warming up."""
+    ready = _converter_ready.is_set() and _converter is not None
+    return {
+        "converter_ready": ready,
+        "error": _converter_error,
+    }
+
+
 @app.get("/")
 async def serve_index():
     return FileResponse("index.html")
+
 
 app.mount("/Outputs", StaticFiles(directory=str(OUTPUTS_ROOT)), name="Outputs")
 
@@ -194,7 +241,7 @@ async def convert_documents_batch(files: List[UploadFile] = File(...)):
                 "error": str(exc),
             })
 
-    if not converted and failed:
+    if not converted and not skipped and failed:
         raise HTTPException(
             status_code=500,
             detail={
