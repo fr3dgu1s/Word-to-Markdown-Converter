@@ -198,11 +198,15 @@
             <input type="file" id="file-input" accept=".docx,.DOCX,.md,.MD,.txt" class="hidden" />
             <input type="file" id="batch-file-input" accept=".docx,.DOCX" multiple class="hidden" />
             <input type="file" id="folder-input" accept=".docx,.DOCX" webkitdirectory directory multiple class="hidden" />
+            <input type="file" id="protected-check-input" accept=".docx,.DOCX" class="hidden" />
             <div class="upload-actions">
                 <button type="button" onclick="event.stopPropagation(); document.getElementById('batch-file-input').click();">Batch Convert Selected Files</button>
                 <button type="button" onclick="event.stopPropagation(); document.getElementById('folder-input').click();">Batch Convert Folder</button>
+                <button type="button" onclick="event.stopPropagation(); runProtectedAccessCheck();">Run Protected Access Check</button>
+                <button type="button" onclick="event.stopPropagation(); document.getElementById('protected-check-input').click();">Test Protected File Access</button>
             </div>
             <div id="batch-status" class="batch-status hidden"></div>
+            <div id="protected-check-status" class="batch-status hidden"></div>
         </div>
     </div>
 
@@ -294,8 +298,10 @@
     const fileInput      = document.getElementById('file-input');
     const batchFileInput = document.getElementById('batch-file-input');
     const folderInput    = document.getElementById('folder-input');
+    const protectedCheckInput = document.getElementById('protected-check-input');
     const dropZone       = document.getElementById('drop-zone');
     const batchStatus    = document.getElementById('batch-status');
+    const protectedCheckStatus = document.getElementById('protected-check-status');
     const stepUpload     = document.getElementById('step-upload');
     const stepLoading    = document.getElementById('step-loading');
     const stepWorkspace  = document.getElementById('step-workspace');
@@ -351,6 +357,11 @@
     function showBatchStatus(summaryHtml) {
         batchStatus.innerHTML = summaryHtml;
         batchStatus.classList.remove('hidden');
+    }
+
+    function showProtectedCheckStatus(summaryHtml) {
+        protectedCheckStatus.innerHTML = summaryHtml;
+        protectedCheckStatus.classList.remove('hidden');
     }
 
     // ── Dirty tracking ────────────────────────────────────────────────────────
@@ -410,11 +421,66 @@
         processFiles(e.target.files, 'folder', true);
         folderInput.value = '';
     });
+    protectedCheckInput.addEventListener('change', e => {
+        const file = e.target.files && e.target.files[0];
+        if (file) testProtectedFileAccess(file);
+        protectedCheckInput.value = '';
+    });
+
+    function runProtectedAccessCheck() {
+        fetch('/api/protected-access-check')
+            .then(r => r.ok ? r.json() : Promise.reject(new Error('Check failed')))
+            .then(data => {
+                const checks = data.checks || {};
+                const rows = [];
+                for (const [name, check] of Object.entries(checks)) {
+                    const mark = check.ok ? '✅' : '❌';
+                    rows.push(`<li>${mark} <strong>${name}</strong>: ${check.message || ''}</li>`);
+                }
+                showProtectedCheckStatus(
+                    `<strong>${data.ok ? 'Protected access prerequisites are ready.' : 'Protected access prerequisites need attention.'}</strong><ul>${rows.join('')}</ul>`
+                );
+            })
+            .catch(err => {
+                showProtectedCheckStatus(`<strong>Protected access check failed:</strong> ${err.message}`);
+            });
+    }
+
+    function testProtectedFileAccess(file) {
+        const formData = new FormData();
+        formData.append('file', file);
+
+        fetch('/api/protected-file-check', { method: 'POST', body: formData })
+            .then(async r => {
+                if (!r.ok) {
+                    let msg = 'Protected file check failed.';
+                    try {
+                        const payload = await r.json();
+                        if (typeof payload?.detail === 'string') msg = payload.detail;
+                    } catch (_err) {
+                        // Keep default message.
+                    }
+                    throw new Error(msg);
+                }
+                return r.json();
+            })
+            .then(data => {
+                const state = data.ok ? '✅' : '❌';
+                const identityInfo = data.identity?.upn ? `<br>Identity: ${data.identity.upn}` : '';
+                showProtectedCheckStatus(
+                    `<strong>${state} ${data.file}</strong><br>${data.message || ''}${identityInfo}`
+                );
+            })
+            .catch(err => {
+                showProtectedCheckStatus(`<strong>Protected file test failed:</strong> ${err.message}`);
+            });
+    }
 
     // ── Path A: DOCX → Server Conversion ─────────────────────────────────────
     function startDocxConversion(file) {
         setLoadingState('⏳ AI is processing your document...', 'Extracting text, tables, and formatting.');
         batchStatus.classList.add('hidden');
+        protectedCheckStatus.classList.add('hidden');
         stepUpload.classList.add('hidden');
         stepLoading.classList.remove('hidden');
 
@@ -516,6 +582,7 @@
     // ── Path B: Local .md file ────────────────────────────────────────────────
     function openLocalMarkdown(file) {
         batchStatus.classList.add('hidden');
+        protectedCheckStatus.classList.add('hidden');
         const reader = new FileReader();
         reader.onload = e => {
             markdownEditor.value = e.target.result;
@@ -728,6 +795,7 @@
         fileInput.value         = '';
         batchFileInput.value    = '';
         folderInput.value       = '';
+        protectedCheckInput.value = '';
         markdownEditor.value    = '';
         visualPreview.innerHTML = '';
         currentFileName = null;
@@ -735,6 +803,7 @@
         isServerDoc     = false;
         clearDirty();
         batchStatus.classList.add('hidden');
+        protectedCheckStatus.classList.add('hidden');
         setLoadingState('⏳ AI is processing your document...', 'Extracting text, tables, and formatting.');
         btnOpenFolder.classList.add('hidden');
         btnTabEdit.click();

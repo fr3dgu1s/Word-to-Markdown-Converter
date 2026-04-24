@@ -11,7 +11,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
-from protected_file_access import ensure_accessible_docx, ProtectedFileAccessError
+from protected_file_access import (
+    ensure_accessible_docx,
+    ProtectedFileAccessError,
+    run_protected_access_diagnostics,
+    test_protected_file_access,
+)
 
 app = FastAPI()
 
@@ -159,6 +164,33 @@ async def converter_status():
         "converter_ready": ready,
         "error": _converter_error,
     }
+
+
+@app.get("/api/protected-access-check")
+async def protected_access_check():
+    return run_protected_access_diagnostics()
+
+
+@app.post("/api/protected-file-check")
+async def protected_file_check(file: UploadFile = File(...)):
+    filename = file.filename or ""
+    if not filename.lower().endswith(".docx"):
+        raise HTTPException(status_code=400, detail="Only .docx files are supported for this check.")
+
+    tmp_path: Optional[Path] = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp:
+            shutil.copyfileobj(file.file, tmp)
+            tmp_path = Path(tmp.name)
+
+        result = test_protected_file_access(tmp_path)
+        return {
+            "file": filename,
+            **result,
+        }
+    finally:
+        if tmp_path and tmp_path.exists():
+            tmp_path.unlink(missing_ok=True)
 
 
 @app.get("/")

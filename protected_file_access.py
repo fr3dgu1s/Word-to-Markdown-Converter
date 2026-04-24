@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 import uuid
@@ -15,6 +16,30 @@ except ImportError:
 
 class ProtectedFileAccessError(Exception):
     pass
+
+
+def _az_command_candidates() -> list[list[str]]:
+    candidates: list[list[str]] = []
+
+    # 1) PATH-based lookup.
+    for exe_name in ("az", "az.cmd"):
+        resolved = shutil.which(exe_name)
+        if resolved:
+            candidates.append([resolved])
+
+    # 2) Common Windows install paths.
+    common_paths = [
+        r"C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin\az.cmd",
+        r"C:\Program Files (x86)\Microsoft SDKs\Azure\CLI2\wbin\az.cmd",
+    ]
+    for full_path in common_paths:
+        if os.path.exists(full_path):
+            candidates.append([full_path])
+
+    # 3) Last chance: rely on shell resolution.
+    candidates.append(["az"])
+    candidates.append(["az.cmd"])
+    return candidates
 
 
 def _import_requests():
@@ -39,32 +64,50 @@ def _import_msal():
 
 def _get_graph_token_from_azure_cli() -> Optional[str]:
     """Reuse the user's existing az login session for Graph when available."""
-    try:
-        result = subprocess.run(
-            [
-                "az",
-                "account",
-                "get-access-token",
-                "--resource-type",
-                "ms-graph",
-                "--query",
-                "accessToken",
-                "-o",
-                "tsv",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=20,
-            check=False,
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return None
+    commands_to_try = [
+        [
+            "account",
+            "get-access-token",
+            "--resource-type",
+            "ms-graph",
+            "--query",
+            "accessToken",
+            "-o",
+            "tsv",
+        ],
+        [
+            "account",
+            "get-access-token",
+            "--resource",
+            "https://graph.microsoft.com/",
+            "--query",
+            "accessToken",
+            "-o",
+            "tsv",
+        ],
+    ]
 
-    if result.returncode != 0:
-        return None
+    for az_exe in _az_command_candidates():
+        for args in commands_to_try:
+            try:
+                result = subprocess.run(
+                    az_exe + args,
+                    capture_output=True,
+                    text=True,
+                    timeout=25,
+                    check=False,
+                )
+            except (FileNotFoundError, subprocess.TimeoutExpired):
+                continue
 
-    token = (result.stdout or "").strip()
-    return token or None
+            if result.returncode != 0:
+                continue
+
+            token = (result.stdout or "").strip()
+            if token:
+                return token
+
+    return None
 
 
 def _build_token_cache(cache_path: Path) -> Any:
@@ -234,3 +277,105 @@ def ensure_accessible_docx(file_path: Path) -> Tuple[Path, Dict[str, str], bool]
     identity = get_current_identity()
     accessible_copy = export_accessible_copy_via_word(file_path)
     return accessible_copy, identity, True
+
+
+def check_word_automation() -> Dict[str, str | bool]:
+    """Verify that local Word automation is available for protected file export."""
+    if win32com is None:
+        return {
+            "ok": False,
+            "message": "pywin32 is not installed; Word automation unavailable.",
+        }
+
+    word = None
+    try:
+        word = win32com.client.DispatchEx("Word.Application")
+        word.Visible = False
+        return {
+            "ok": True,
+            "message": "Microsoft Word automation is available.",
+        }
+    except Exception as exc:
+        return {
+            "ok": False,
+            "message": f"Word automation failed: {exc}",
+        }
+    finally:
+        if word is not None:
+            try:
+                word.Quit()
+            except Exception:
+                pass
+
+
+def run_protected_access_diagnostics() -> Dict[str, Any]:
+    """Run prerequisites checks used by the UI diagnostics button."""
+    checks: Dict[str, Dict[str, Any]] = {}
+
+    cli_token = _get_graph_token_from_azure_cli()
+    checks["azure_cli_token"] = {
+        "ok": bool(cli_token),
+        "message": (
+            "Azure CLI delegated Graph token acquired."
+            if cli_token
+            else "No delegated Graph token from Azure CLI."
+        ),
+    }
+
+    try:
+        identity = get_current_identity()
+        checks["identity"] = {
+            "ok": True,
+            "message": f"Identity validated: {identity.get('upn', '')}",
+            "data": identity,
+        }
+    except Exception as exc:
+        checks["identity"] = {
+            "ok": False,
+            "message": str(exc),
+        }
+
+    word_status = check_word_automation()
+    checks["word_automation"] = {
+        "ok": bool(word_status.get("ok")),
+        "message": str(word_status.get("message", "")),
+    }
+
+    overall_ok = bool(checks["identity"]["ok"] and checks["word_automation"]["ok"])
+    return {
+        "ok": overall_ok,
+        "checks": checks,
+    }
+
+
+def test_protected_file_access(file_path: Path) -> Dict[str, Any]:
+    """Test whether a specific file can be opened/exported for conversion."""
+    generated_copy: Optional[Path] = None
+    try:
+        protected = is_file_dlp_protected(file_path)
+        if not protected:
+            return {
+                "ok": True,
+                "protected": False,
+                "message": "File is not DLP-protected; protected-file flow is not required.",
+            }
+
+        accessible_path, identity, was_generated = ensure_accessible_docx(file_path)
+        if was_generated:
+            generated_copy = accessible_path
+
+        return {
+            "ok": True,
+            "protected": True,
+            "message": "Protected file access succeeded for current identity.",
+            "identity": identity,
+        }
+    except Exception as exc:
+        return {
+            "ok": False,
+            "protected": True,
+            "message": str(exc),
+        }
+    finally:
+        if generated_copy and generated_copy.exists():
+            generated_copy.unlink(missing_ok=True)
