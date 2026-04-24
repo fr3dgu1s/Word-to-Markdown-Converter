@@ -72,6 +72,22 @@ Open your browser and go to: [http://127.0.0.1:8000](http://127.0.0.1:8000)
 
 ---
 
+## ▶ Silent Launch (No Command Line)
+
+If you want to run the app without opening a terminal window:
+
+1. Double-click `launch_silent.vbs`
+2. It starts Python in the background and opens the web UI automatically
+3. No command prompt window is shown
+
+To stop the backend without terminal commands:
+
+1. Double-click `stop_silent.vbs`
+
+You can still use the in-app **Stop Python App** button as before.
+
+---
+
 ## 🛑 Closing the Application
 
 To stop the application:
@@ -132,6 +148,23 @@ If the user does not have access rights, conversion is denied.
 ---
 
 ## 🔐 MSAL Configuration for Protected Files
+
+Protected file conversion now supports two secure delegated identity options:
+
+1. **Recommended for internal users**: sign in with Azure CLI (`az login`)
+2. **Fallback**: MSAL interactive login using app registration (`MSAL_CLIENT_ID`)
+
+### Option A (Recommended): Azure CLI identity (no app config in this app)
+
+Run once in PowerShell:
+
+```powershell
+az login
+```
+
+The app will reuse the currently signed-in user token to validate identity.
+
+### Option B: MSAL app registration fallback
 
 Set these environment variables before starting the server:
 

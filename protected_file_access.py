@@ -1,5 +1,6 @@
 import json
 import os
+import subprocess
 import tempfile
 import uuid
 import zipfile
@@ -17,6 +18,36 @@ except ImportError:
 
 class ProtectedFileAccessError(Exception):
     pass
+
+
+def _get_graph_token_from_azure_cli() -> Optional[str]:
+    """Reuse the user's existing az login session for Graph when available."""
+    try:
+        result = subprocess.run(
+            [
+                "az",
+                "account",
+                "get-access-token",
+                "--resource-type",
+                "ms-graph",
+                "--query",
+                "accessToken",
+                "-o",
+                "tsv",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=False,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+
+    if result.returncode != 0:
+        return None
+
+    token = (result.stdout or "").strip()
+    return token or None
 
 
 def _build_token_cache(cache_path: Path) -> msal.SerializableTokenCache:
@@ -52,6 +83,22 @@ def is_file_dlp_protected(file_path: Path) -> bool:
 
 def get_current_identity() -> Dict[str, str]:
     """Acquire delegated token for the current user and return basic identity details."""
+    # First, try Azure CLI token from current signed-in identity.
+    cli_token = _get_graph_token_from_azure_cli()
+    if cli_token:
+        headers = {"Authorization": f"Bearer {cli_token}"}
+        me = requests.get("https://graph.microsoft.com/v1.0/me", headers=headers, timeout=20)
+        if me.status_code == 200:
+            profile = me.json()
+            return {
+                "display_name": profile.get("displayName", ""),
+                "upn": profile.get("userPrincipalName", ""),
+                "oid": profile.get("id", ""),
+                "tenant": "azure-cli",
+                "scopes": json.dumps(["User.Read"]),
+            }
+
+    # Fallback: local MSAL public client flow.
     client_id = os.getenv("MSAL_CLIENT_ID")
     tenant_id = os.getenv("MSAL_TENANT_ID", "organizations")
     scope_csv = os.getenv("MSAL_SCOPES", "User.Read")
@@ -59,7 +106,8 @@ def get_current_identity() -> Dict[str, str]:
 
     if not client_id:
         raise ProtectedFileAccessError(
-            "Missing MSAL_CLIENT_ID. Set it to your Entra app registration client ID."
+            "Protected file access requires a delegated identity token. "
+            "Sign in via `az login` or configure MSAL_CLIENT_ID for interactive login."
         )
 
     base_cache = Path(os.getenv("MSAL_CACHE_DIR", tempfile.gettempdir()))
