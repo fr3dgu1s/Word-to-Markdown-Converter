@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PM Spec Converter — Starting…</title>
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            background: #f0f2f5;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            color: #1a1a1a;
+        }
+        .card {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 4px 24px rgba(0,0,0,0.08);
+            padding: 3rem 3.5rem;
+            text-align: center;
+            max-width: 460px;
+            width: 90%;
+        }
+        .logo {
+            width: 80px;
+            height: 80px;
+            margin: 0 auto 1.5rem;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #eef7ff, #f9f3ff);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2.2rem;
+        }
+        h1 {
+            font-size: 1.4rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+            color: #111827;
+        }
+        .subtitle {
+            font-size: 0.95rem;
+            color: #6b7280;
+            margin-bottom: 2rem;
+            line-height: 1.5;
+        }
+        /* Spinner ring */
+        .ring-wrap {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 1.5rem;
+        }
+        .ring {
+            width: 52px;
+            height: 52px;
+            border: 4px solid #e5e7eb;
+            border-top-color: #0066cc;
+            border-radius: 50%;
+            animation: spin 0.9s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        /* Progress dots */
+        .status {
+            font-size: 0.88rem;
+            color: #9ca3af;
+            min-height: 1.4em;
+        }
+        .dot-pulse::after {
+            content: '';
+            animation: dots 1.5s steps(4, end) infinite;
+        }
+        @keyframes dots {
+            0%   { content: ''; }
+            25%  { content: '.'; }
+            50%  { content: '..'; }
+            75%  { content: '...'; }
+            100% { content: ''; }
+        }
+        .status.error { color: #ef4444; }
+        .retry-btn {
+            margin-top: 1rem;
+            padding: 0.45rem 1.1rem;
+            border: 1px solid #d1d5db;
+            background: white;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            color: #374151;
+            display: none;
+        }
+        .retry-btn:hover { background: #f9fafb; }
+    </style>
+</head>
+<body>
+<div class="card">
+    <div class="logo">⚙️</div>
+    <h1>PM Spec Converter</h1>
+    <p class="subtitle">Starting the document engine.<br>This takes a minute on first launch.</p>
+
+    <div class="ring-wrap">
+        <div class="ring" id="ring"></div>
+    </div>
+
+    <p class="status" id="status">
+        <span class="dot-pulse">Waiting for server</span>
+    </p>
+    <button class="retry-btn" id="retry-btn" onclick="startPolling()">Retry</button>
+</div>
+
+<script>
+    const APP_URL    = 'http://127.0.0.1:8000';
+    const HEALTH_URL = APP_URL + '/health';
+
+    const statusEl = document.getElementById('status');
+    const ringEl   = document.getElementById('ring');
+    const retryBtn = document.getElementById('retry-btn');
+
+    let attempts   = 0;
+    let timerId    = null;
+
+    function setStatus(html, isError) {
+        statusEl.innerHTML = html;
+        statusEl.className = 'status' + (isError ? ' error' : '');
+    }
+
+    function probe() {
+        attempts++;
+        const secs = Math.round(attempts * 2);
+        setStatus(`<span class="dot-pulse">Waiting for server (${secs}s)</span>`);
+
+        fetch(HEALTH_URL, { cache: 'no-store' })
+            .then(r => {
+                if (r.ok) {
+                    // Server is up — redirect immediately.
+                    setStatus('✅ Ready! Redirecting…');
+                    ringEl.style.borderTopColor = '#22c55e';
+                    clearTimeout(timerId);
+                    window.location.replace(APP_URL);
+                } else {
+                    scheduleNext();
+                }
+            })
+            .catch(() => {
+                if (attempts > 150) {
+                    // ~5 minutes of trying — show error state.
+                    setStatus('⚠ Server did not start. Check that Python is installed and try again.', true);
+                    ringEl.style.display = 'none';
+                    retryBtn.style.display = 'inline-block';
+                    return;
+                }
+                scheduleNext();
+            });
+    }
+
+    function scheduleNext() {
+        // Back-off: start at 2 s, plateau at 5 s after 30 attempts.
+        const delay = attempts < 10 ? 2000 : attempts < 30 ? 3000 : 5000;
+        timerId = setTimeout(probe, delay);
+    }
+
+    function startPolling() {
+        attempts = 0;
+        retryBtn.style.display = 'none';
+        ringEl.style.display   = '';
+        ringEl.style.borderTopColor = '#0066cc';
+        probe();
+    }
+
+    startPolling();
+</script>
+</body>
+</html>
