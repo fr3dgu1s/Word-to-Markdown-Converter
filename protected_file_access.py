@@ -5,10 +5,7 @@ import tempfile
 import uuid
 import zipfile
 from pathlib import Path
-from typing import Dict, Optional, Tuple
-
-import msal
-import requests
+from typing import Any, Dict, Optional, Tuple
 
 try:
     import win32com.client  # type: ignore
@@ -18,6 +15,26 @@ except ImportError:
 
 class ProtectedFileAccessError(Exception):
     pass
+
+
+def _import_requests():
+    try:
+        import requests  # type: ignore
+        return requests
+    except ImportError as exc:
+        raise ProtectedFileAccessError(
+            "Missing dependency 'requests'. Install requirements to use protected-file access."
+        ) from exc
+
+
+def _import_msal():
+    try:
+        import msal  # type: ignore
+        return msal
+    except ImportError as exc:
+        raise ProtectedFileAccessError(
+            "Missing dependency 'msal'. Install requirements to use protected-file access."
+        ) from exc
 
 
 def _get_graph_token_from_azure_cli() -> Optional[str]:
@@ -50,14 +67,15 @@ def _get_graph_token_from_azure_cli() -> Optional[str]:
     return token or None
 
 
-def _build_token_cache(cache_path: Path) -> msal.SerializableTokenCache:
+def _build_token_cache(cache_path: Path) -> Any:
+    msal = _import_msal()
     cache = msal.SerializableTokenCache()
     if cache_path.exists():
         cache.deserialize(cache_path.read_text(encoding="utf-8"))
     return cache
 
 
-def _save_token_cache(cache: msal.SerializableTokenCache, cache_path: Path) -> None:
+def _save_token_cache(cache: Any, cache_path: Path) -> None:
     if cache.has_state_changed:
         cache_path.parent.mkdir(parents=True, exist_ok=True)
         cache_path.write_text(cache.serialize(), encoding="utf-8")
@@ -83,6 +101,8 @@ def is_file_dlp_protected(file_path: Path) -> bool:
 
 def get_current_identity() -> Dict[str, str]:
     """Acquire delegated token for the current user and return basic identity details."""
+    requests = _import_requests()
+
     # First, try Azure CLI token from current signed-in identity.
     cli_token = _get_graph_token_from_azure_cli()
     if cli_token:
@@ -115,6 +135,7 @@ def get_current_identity() -> Dict[str, str]:
     token_cache = _build_token_cache(cache_path)
 
     authority = f"https://login.microsoftonline.com/{tenant_id}"
+    msal = _import_msal()
     app = msal.PublicClientApplication(
         client_id=client_id,
         authority=authority,
