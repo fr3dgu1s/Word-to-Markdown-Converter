@@ -13,6 +13,7 @@ from fastapi.responses import FileResponse
 
 from protected_file_access import (
     ensure_accessible_docx,
+    export_accessible_copy_via_word,
     ProtectedFileAccessError,
     run_protected_access_diagnostics,
     test_protected_file_access,
@@ -57,9 +58,8 @@ def _get_converter():
         raise RuntimeError("Document converter is not available.")
     return _converter
 
-# 1. DIRECTORY CONFIG
-BASE_DIR = Path("C:/temp/Word-to-MD-App")
-OUTPUTS_ROOT = BASE_DIR / "Outputs"
+# 1. DIRECTORY CONFIG  — paths relative to this script's location
+OUTPUTS_ROOT = Path(__file__).resolve().parent / "Outputs"
 GLOBAL_IMAGES_DIR = OUTPUTS_ROOT / "Images"
 
 OUTPUTS_ROOT.mkdir(parents=True, exist_ok=True)
@@ -102,23 +102,31 @@ def convert_file_to_markdown(
 
     tmp_path: Optional[Path] = None
     accessible_tmp_path: Optional[Path] = None
-    source_path: Optional[Path] = None
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp:
             shutil.copyfileobj(upload_file.file, tmp)
             tmp_path = Path(tmp.name)
 
-        try:
-            source_path, _identity, generated_copy = ensure_accessible_docx(tmp_path)
-            if generated_copy:
-                accessible_tmp_path = source_path
-        except ProtectedFileAccessError:
-            # Transparent fallback: try direct conversion path before failing.
-            source_path = tmp_path
-
         from docling_core.types.doc import PictureItem  # noqa: PLC0415  (lazy after init)
 
-        conv_res = _get_converter().convert(source_path)
+        # Try direct conversion first; fall back to Word COM export for DLP/IRM-protected files.
+        try:
+            conv_res = _get_converter().convert(tmp_path)
+        except Exception as direct_exc:
+            try:
+                accessible_path = export_accessible_copy_via_word(tmp_path)
+                accessible_tmp_path = accessible_path
+                conv_res = _get_converter().convert(accessible_path)
+            except ProtectedFileAccessError as word_exc:
+                raise RuntimeError(
+                    f"Direct conversion failed ({direct_exc}). "
+                    f"Word COM export also failed: {word_exc}"
+                ) from direct_exc
+            except Exception as word_exc:
+                raise RuntimeError(
+                    f"Direct conversion failed ({direct_exc}). "
+                    f"Word COM re-save also failed: {word_exc}"
+                ) from direct_exc
 
         picture_counter = 0
         for element, _level in conv_res.document.iterate_items():

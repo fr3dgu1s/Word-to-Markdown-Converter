@@ -11,13 +11,20 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 try:
+    import pythoncom  # type: ignore
     import win32com.client  # type: ignore
 except ImportError:
+    pythoncom = None
     win32com = None
 
 
 class ProtectedFileAccessError(Exception):
     pass
+
+
+WD_ALERTS_NONE = 0
+WD_FORMAT_XML_DOCUMENT = 16
+MsoAutomationSecurityForceDisable = 3
 
 
 _IDENTITY_CACHE_SECONDS = 600
@@ -277,47 +284,141 @@ def get_current_identity() -> Dict[str, str]:
     return identity
 
 
-def export_accessible_copy_via_word(file_path: Path) -> Path:
-    """Open a protected doc with Word under current user context and re-save as docx."""
-    if win32com is None:
+def cleanup_temporary_decrypted_file(temp_docx_path: str | Path) -> None:
+    """Remove a temporary decrypted copy after downstream conversion finishes."""
+    temp_path = Path(temp_docx_path)
+    if temp_path.exists():
+        temp_path.unlink(missing_ok=True)
+
+
+def decrypt_and_get_temp_path(protected_docx_path: str) -> str:
+    """
+    Open a potentially IRM/RMS-protected .docx in Word and save a temporary
+    standard .docx copy into the OS temp directory.
+
+    The caller is responsible for deleting the returned path after conversion,
+    typically in a finally block via ``cleanup_temporary_decrypted_file``.
+    """
+    source_path = Path(protected_docx_path).expanduser().resolve()
+    if not source_path.exists():
+        raise ProtectedFileAccessError(f"File not found: {source_path}")
+    if source_path.suffix.lower() != ".docx":
         raise ProtectedFileAccessError(
-            "pywin32 is required to process protected files on Windows. Install pywin32."
+            f"Expected a .docx file for Word decryption, got: {source_path.name}"
+        )
+    if win32com is None or pythoncom is None:
+        raise ProtectedFileAccessError(
+            "pywin32 is required for Word COM automation on Windows. "
+            "Install it with `pip install pywin32` and ensure Microsoft Word is installed."
         )
 
-    output_path = Path(tempfile.gettempdir()) / f"{file_path.stem}-accessible-{uuid.uuid4().hex}.docx"
+    handle = tempfile.NamedTemporaryFile(
+        delete=False,
+        prefix=f"{source_path.stem}-decrypted-",
+        suffix=".docx",
+    )
+    handle.close()
+    temp_output_path = Path(handle.name)
 
     word = None
     doc = None
+    com_initialized = False
+    phase = "initializing Word COM"
+
     try:
-        word = win32com.client.DispatchEx("Word.Application")
+        pythoncom.CoInitialize()
+        com_initialized = True
+
+        try:
+            word = win32com.client.DispatchEx("Word.Application")
+        except Exception as exc:
+            raise ProtectedFileAccessError(
+                "Failed to initialize Microsoft Word COM automation. "
+                "Verify that Word is installed and can be launched under the current user session. "
+                f"Underlying error: {exc}"
+            ) from exc
+
         word.Visible = False
-        word.DisplayAlerts = 0
+        word.DisplayAlerts = WD_ALERTS_NONE
+        try:
+            word.AutomationSecurity = MsoAutomationSecurityForceDisable
+        except Exception:
+            pass
 
-        doc = word.Documents.Open(
-            str(file_path),
-            ReadOnly=True,
-            AddToRecentFiles=False,
-        )
+        phase = "opening the protected document in Word"
+        try:
+            doc = word.Documents.Open(
+                str(source_path),
+                ConfirmConversions=False,
+                ReadOnly=True,
+                AddToRecentFiles=False,
+                Visible=False,
+                OpenAndRepair=False,
+                NoEncodingDialog=True,
+            )
+        except Exception as exc:
+            raise ProtectedFileAccessError(
+                "Word could not open the protected document for the current signed-in user. "
+                "This usually means Word is not authenticated for the tenant, the sensitivity label "
+                "requires an interactive prompt, or the user lacks export/decrypt rights. "
+                f"Underlying error: {exc}"
+            ) from exc
 
-        # 16 = wdFormatXMLDocument (.docx)
-        doc.SaveAs2(str(output_path), FileFormat=16)
+        phase = "saving a temporary decrypted copy"
+        try:
+            doc.SaveAs2(
+                str(temp_output_path),
+                FileFormat=WD_FORMAT_XML_DOCUMENT,
+                AddToRecentFiles=False,
+            )
+        except Exception as exc:
+            raise ProtectedFileAccessError(
+                "Word opened the protected document but could not save a standard .docx copy. "
+                "The current user may not have permission to export an unprotected copy, or the label policy "
+                "may block this operation. "
+                f"Underlying error: {exc}"
+            ) from exc
+
+        if not temp_output_path.exists():
+            raise ProtectedFileAccessError(
+                "Word reported success but no temporary decrypted file was written."
+            )
+        if not zipfile.is_zipfile(temp_output_path):
+            raise ProtectedFileAccessError(
+                "Word created a temporary file, but it is not a standard ZIP-based .docx package. "
+                "The document likely remains protected by policy."
+            )
+
+        return str(temp_output_path)
+    except ProtectedFileAccessError:
+        cleanup_temporary_decrypted_file(temp_output_path)
+        raise
     except Exception as exc:
+        cleanup_temporary_decrypted_file(temp_output_path)
         raise ProtectedFileAccessError(
-            "Protected file could not be opened with current user permissions. "
-            f"{exc}"
+            f"Unexpected failure while {phase}. Underlying error: {exc}"
         ) from exc
     finally:
         if doc is not None:
-            doc.Close(False)
+            try:
+                doc.Close(False)
+            except Exception:
+                pass
         if word is not None:
-            word.Quit()
+            try:
+                word.Quit()
+            except Exception:
+                pass
+        if com_initialized:
+            try:
+                pythoncom.CoUninitialize()
+            except Exception:
+                pass
 
-    if not output_path.exists() or not zipfile.is_zipfile(output_path):
-        raise ProtectedFileAccessError(
-            "Could not create an accessible .docx copy from the protected file."
-        )
 
-    return output_path
+def export_accessible_copy_via_word(file_path: Path) -> Path:
+    """Open a protected doc with Word under current user context and re-save as docx."""
+    return Path(decrypt_and_get_temp_path(str(file_path)))
 
 
 def ensure_accessible_docx(file_path: Path) -> Tuple[Path, Dict[str, str], bool]:
@@ -337,16 +438,20 @@ def ensure_accessible_docx(file_path: Path) -> Tuple[Path, Dict[str, str], bool]
 
 def check_word_automation() -> Dict[str, str | bool]:
     """Verify that local Word automation is available for protected file export."""
-    if win32com is None:
+    if win32com is None or pythoncom is None:
         return {
             "ok": False,
             "message": "pywin32 is not installed; Word automation unavailable.",
         }
 
     word = None
+    com_initialized = False
     try:
+        pythoncom.CoInitialize()
+        com_initialized = True
         word = win32com.client.DispatchEx("Word.Application")
         word.Visible = False
+        word.DisplayAlerts = WD_ALERTS_NONE
         return {
             "ok": True,
             "message": "Microsoft Word automation is available.",
@@ -360,6 +465,11 @@ def check_word_automation() -> Dict[str, str | bool]:
         if word is not None:
             try:
                 word.Quit()
+            except Exception:
+                pass
+        if com_initialized:
+            try:
+                pythoncom.CoUninitialize()
             except Exception:
                 pass
 
@@ -434,4 +544,4 @@ def test_protected_file_access(file_path: Path) -> Dict[str, Any]:
         }
     finally:
         if generated_copy and generated_copy.exists():
-            generated_copy.unlink(missing_ok=True)
+            cleanup_temporary_decrypted_file(generated_copy)
