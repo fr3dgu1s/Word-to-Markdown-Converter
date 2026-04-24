@@ -3,8 +3,10 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
 import uuid
 import zipfile
+import base64
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
@@ -16,6 +18,11 @@ except ImportError:
 
 class ProtectedFileAccessError(Exception):
     pass
+
+
+_IDENTITY_CACHE_SECONDS = 600
+_identity_cache: Optional[Dict[str, str]] = None
+_identity_cache_ts = 0.0
 
 
 def _az_command_candidates() -> list[list[str]]:
@@ -110,6 +117,36 @@ def _get_graph_token_from_azure_cli() -> Optional[str]:
     return None
 
 
+def _extract_identity_from_jwt(token: str) -> Optional[Dict[str, str]]:
+    """Best-effort extraction of basic identity claims from a JWT access token."""
+    try:
+        parts = token.split(".")
+        if len(parts) < 2:
+            return None
+
+        payload_b64 = parts[1]
+        padding = "=" * (-len(payload_b64) % 4)
+        payload_json = base64.urlsafe_b64decode(payload_b64 + padding).decode("utf-8")
+        claims = json.loads(payload_json)
+
+        upn = claims.get("upn") or claims.get("unique_name") or ""
+        display_name = claims.get("name") or upn
+        oid = claims.get("oid") or ""
+        tid = claims.get("tid") or "azure-cli"
+        scopes = claims.get("scp") or "User.Read"
+        scopes_list = scopes.split() if isinstance(scopes, str) else ["User.Read"]
+
+        return {
+            "display_name": display_name,
+            "upn": upn,
+            "oid": oid,
+            "tenant": tid,
+            "scopes": json.dumps(scopes_list),
+        }
+    except Exception:
+        return None
+
+
 def _build_token_cache(cache_path: Path) -> Any:
     msal = _import_msal()
     cache = msal.SerializableTokenCache()
@@ -144,22 +181,38 @@ def is_file_dlp_protected(file_path: Path) -> bool:
 
 def get_current_identity() -> Dict[str, str]:
     """Acquire delegated token for the current user and return basic identity details."""
-    requests = _import_requests()
+    global _identity_cache, _identity_cache_ts
+
+    # Fast in-memory cache to avoid repeated auth checks per protected file in batch.
+    now = time.time()
+    if _identity_cache and (now - _identity_cache_ts) < _IDENTITY_CACHE_SECONDS:
+        return _identity_cache
 
     # First, try Azure CLI token from current signed-in identity.
     cli_token = _get_graph_token_from_azure_cli()
     if cli_token:
+        identity = _extract_identity_from_jwt(cli_token)
+        if identity:
+            _identity_cache = identity
+            _identity_cache_ts = now
+            return identity
+
+        # Fallback to Graph only if token parsing unexpectedly fails.
+        requests = _import_requests()
         headers = {"Authorization": f"Bearer {cli_token}"}
         me = requests.get("https://graph.microsoft.com/v1.0/me", headers=headers, timeout=20)
         if me.status_code == 200:
             profile = me.json()
-            return {
+            identity = {
                 "display_name": profile.get("displayName", ""),
                 "upn": profile.get("userPrincipalName", ""),
                 "oid": profile.get("id", ""),
                 "tenant": "azure-cli",
                 "scopes": json.dumps(["User.Read"]),
             }
+            _identity_cache = identity
+            _identity_cache_ts = now
+            return identity
 
     # Fallback: local MSAL public client flow.
     client_id = os.getenv("MSAL_CLIENT_ID")
@@ -203,6 +256,7 @@ def get_current_identity() -> Dict[str, str]:
         raise ProtectedFileAccessError(f"MSAL sign-in failed. {detail}".strip())
 
     headers = {"Authorization": f"Bearer {result['access_token']}"}
+    requests = _import_requests()
     me = requests.get("https://graph.microsoft.com/v1.0/me", headers=headers, timeout=20)
     if me.status_code != 200:
         raise ProtectedFileAccessError(
@@ -218,6 +272,8 @@ def get_current_identity() -> Dict[str, str]:
         "tenant": tenant_id,
         "scopes": json.dumps(scopes),
     }
+    _identity_cache = identity
+    _identity_cache_ts = now
     return identity
 
 

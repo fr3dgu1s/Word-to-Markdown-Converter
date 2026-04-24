@@ -102,14 +102,19 @@ def convert_file_to_markdown(
 
     tmp_path: Optional[Path] = None
     accessible_tmp_path: Optional[Path] = None
+    source_path: Optional[Path] = None
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp:
             shutil.copyfileobj(upload_file.file, tmp)
             tmp_path = Path(tmp.name)
 
-        source_path, _identity, generated_copy = ensure_accessible_docx(tmp_path)
-        if generated_copy:
-            accessible_tmp_path = source_path
+        try:
+            source_path, _identity, generated_copy = ensure_accessible_docx(tmp_path)
+            if generated_copy:
+                accessible_tmp_path = source_path
+        except ProtectedFileAccessError:
+            # Transparent fallback: try direct conversion path before failing.
+            source_path = tmp_path
 
         from docling_core.types.doc import PictureItem  # noqa: PLC0415  (lazy after init)
 
@@ -142,8 +147,6 @@ def convert_file_to_markdown(
             result["markdown"] = final_markdown
 
         return result
-    except ProtectedFileAccessError as exc:
-        raise HTTPException(status_code=403, detail=str(exc))
     finally:
         if accessible_tmp_path and accessible_tmp_path.exists():
             accessible_tmp_path.unlink(missing_ok=True)
@@ -237,7 +240,8 @@ async def convert_document(file: UploadFile = File(...)):
             "doc_name": single_result["doc_name"],
             "folder_created": str(OUTPUTS_ROOT)
         }
-
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
