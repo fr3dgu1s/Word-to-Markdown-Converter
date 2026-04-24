@@ -44,6 +44,12 @@
         .upload-area:hover { border-color: #0066cc; background: #f0f7ff; }
         .upload-area.dragover { border-color: #28a745; background: #e8f5e9; transform: scale(1.02); }
         .loader { text-align: center; padding: 3rem; font-size: 1.2rem; color: #555; }
+        .upload-actions { margin-top: 1rem; display: flex; gap: 0.6rem; justify-content: center; flex-wrap: wrap; }
+        .upload-actions button { border: 1px solid #c7cfdb; background: #fff; color: #1f2937; border-radius: 8px; padding: 0.55rem 0.95rem; font-weight: 700; cursor: pointer; }
+        .upload-actions button:hover { background: #eef4ff; border-color: #9fb4d8; }
+        .batch-status { margin-top: 1rem; border: 1px solid #d5dfef; border-radius: 8px; background: #f7fbff; padding: 0.85rem 1rem; font-size: 0.9rem; color: #253147; }
+        .batch-status strong { color: #0b4c9d; }
+        .batch-status ul { margin: 0.5rem 0 0; padding-left: 1.1rem; }
 
         /* --- WORKSPACE HEADER --- */
         .editor-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; border-bottom: 2px solid #eee; padding-bottom: 1rem; flex-wrap: wrap; gap: 0.5rem; }
@@ -171,12 +177,19 @@
             <h3 style="margin-top:0;">📁 Drag & Drop a .docx or .md file</h3>
             <p>Convert Word to Markdown using local AI, or instantly preview existing Markdown files.</p>
             <input type="file" id="file-input" accept=".docx,.DOCX,.md,.MD,.txt" class="hidden" />
+            <input type="file" id="batch-file-input" accept=".docx,.DOCX" multiple class="hidden" />
+            <input type="file" id="folder-input" accept=".docx,.DOCX" webkitdirectory directory multiple class="hidden" />
+            <div class="upload-actions">
+                <button type="button" onclick="event.stopPropagation(); document.getElementById('batch-file-input').click();">Batch Convert Selected Files</button>
+                <button type="button" onclick="event.stopPropagation(); document.getElementById('folder-input').click();">Batch Convert Folder</button>
+            </div>
+            <div id="batch-status" class="batch-status hidden"></div>
         </div>
     </div>
 
     <div id="step-loading" class="loader hidden">
-        <h3>⏳ AI is processing your document...</h3>
-        <p>Extracting text, tables, and formatting.</p>
+        <h3 id="loading-title">⏳ AI is processing your document...</h3>
+        <p id="loading-subtitle">Extracting text, tables, and formatting.</p>
     </div>
 
     <div id="step-workspace" class="hidden">
@@ -255,10 +268,15 @@
 <script>
     // ── Refs ──────────────────────────────────────────────────────────────────
     const fileInput      = document.getElementById('file-input');
+    const batchFileInput = document.getElementById('batch-file-input');
+    const folderInput    = document.getElementById('folder-input');
     const dropZone       = document.getElementById('drop-zone');
+    const batchStatus    = document.getElementById('batch-status');
     const stepUpload     = document.getElementById('step-upload');
     const stepLoading    = document.getElementById('step-loading');
     const stepWorkspace  = document.getElementById('step-workspace');
+    const loadingTitle   = document.getElementById('loading-title');
+    const loadingSubtitle = document.getElementById('loading-subtitle');
     const markdownEditor = document.getElementById('markdown-editor');
     const visualPreview  = document.getElementById('visual-preview');
     const btnTabEdit     = document.getElementById('btn-tab-edit');
@@ -279,6 +297,16 @@
     let serverSavedPath = null;
     let isServerDoc     = false;
     let isDirty         = false;
+
+    function setLoadingState(title, subtitle) {
+        loadingTitle.textContent = title;
+        loadingSubtitle.textContent = subtitle;
+    }
+
+    function showBatchStatus(summaryHtml) {
+        batchStatus.innerHTML = summaryHtml;
+        batchStatus.classList.remove('hidden');
+    }
 
     // ── Dirty tracking ────────────────────────────────────────────────────────
     markdownEditor.addEventListener('input', () => {
@@ -315,11 +343,33 @@
         else if (name.endsWith('.md') || name.endsWith('.txt')) openLocalMarkdown(file);
         else alert("Please drop a valid .docx or .md file!");
     }
-    dropZone.addEventListener('drop', e => processFile(e.dataTransfer.files[0]));
+    function processFiles(fileList, sourceLabel = 'selected files', forceBatch = false) {
+        const files = Array.from(fileList || []);
+        if (!files.length) return;
+
+        if (files.length === 1 && !forceBatch) {
+            processFile(files[0]);
+            return;
+        }
+
+        startBatchConversion(files, sourceLabel);
+    }
+
+    dropZone.addEventListener('drop', e => processFiles(e.dataTransfer.files, 'dropped files'));
     fileInput.addEventListener('change', e => processFile(e.target.files[0]));
+    batchFileInput.addEventListener('change', e => {
+        processFiles(e.target.files, 'selected files', true);
+        batchFileInput.value = '';
+    });
+    folderInput.addEventListener('change', e => {
+        processFiles(e.target.files, 'folder', true);
+        folderInput.value = '';
+    });
 
     // ── Path A: DOCX → Server Conversion ─────────────────────────────────────
     function startDocxConversion(file) {
+        setLoadingState('⏳ AI is processing your document...', 'Extracting text, tables, and formatting.');
+        batchStatus.classList.add('hidden');
         stepUpload.classList.add('hidden');
         stepLoading.classList.remove('hidden');
 
@@ -327,7 +377,19 @@
         formData.append("file", file);
 
         fetch("/api/convert", { method: "POST", body: formData })
-            .then(r => { if (!r.ok) throw new Error("Server error. Is the Python server running?"); return r.json(); })
+            .then(async r => {
+                if (!r.ok) {
+                    let msg = "Server error. Is the Python server running?";
+                    try {
+                        const payload = await r.json();
+                        if (typeof payload?.detail === 'string') msg = payload.detail;
+                    } catch (_err) {
+                        // Keep default message.
+                    }
+                    throw new Error(msg);
+                }
+                return r.json();
+            })
             .then(data => {
                 if (data.error) throw new Error(data.error);
 
@@ -348,8 +410,67 @@
             .catch(err => { alert("Conversion failed: " + err.message); resetApp(); });
     }
 
+    function startBatchConversion(files, sourceLabel = 'selected files') {
+        const docxFiles = files.filter(f => f.name.toLowerCase().endsWith('.docx'));
+        if (!docxFiles.length) {
+            alert('Batch conversion supports .docx files only.');
+            return;
+        }
+
+        setLoadingState('⏳ Batch conversion in progress...', `Converting ${docxFiles.length} .docx files from ${sourceLabel}.`);
+        stepUpload.classList.add('hidden');
+        stepLoading.classList.remove('hidden');
+
+        const formData = new FormData();
+        docxFiles.forEach(file => formData.append('files', file));
+
+        fetch('/api/convert-batch', { method: 'POST', body: formData })
+            .then(async r => {
+                if (!r.ok) {
+                    let msg = 'Server error during batch conversion.';
+                    try {
+                        const payload = await r.json();
+                        if (payload?.detail?.message) msg = payload.detail.message;
+                        else if (typeof payload?.detail === 'string') msg = payload.detail;
+                    } catch (_err) {
+                        // Keep default message.
+                    }
+                    throw new Error(msg);
+                }
+                return r.json();
+            })
+            .then(data => {
+                stepLoading.classList.add('hidden');
+                stepWorkspace.classList.add('hidden');
+                stepUpload.classList.remove('hidden');
+
+                const converted = data.converted || [];
+                const failed = data.failed || [];
+                const skipped = data.skipped || [];
+
+                const detailItems = [];
+                if (converted.length) detailItems.push(`<li><strong>${converted.length}</strong> file(s) converted and saved.</li>`);
+                if (failed.length) detailItems.push(`<li><strong>${failed.length}</strong> file(s) failed conversion.</li>`);
+                if (skipped.length) detailItems.push(`<li><strong>${skipped.length}</strong> file(s) skipped (not .docx).</li>`);
+
+                showBatchStatus(
+                    `<strong>Batch conversion finished.</strong><br>Output folder: ${data.folder_created}<ul>${detailItems.join('')}</ul>`
+                );
+
+                if (converted.length > 0) {
+                    openFolder();
+                }
+            })
+            .catch(err => {
+                stepLoading.classList.add('hidden');
+                stepUpload.classList.remove('hidden');
+                alert('Batch conversion failed: ' + err.message);
+            });
+    }
+
     // ── Path B: Local .md file ────────────────────────────────────────────────
     function openLocalMarkdown(file) {
+        batchStatus.classList.add('hidden');
         const reader = new FileReader();
         reader.onload = e => {
             markdownEditor.value = e.target.result;
@@ -560,12 +681,16 @@
     // ── Reset ─────────────────────────────────────────────────────────────────
     function resetApp() {
         fileInput.value         = '';
+        batchFileInput.value    = '';
+        folderInput.value       = '';
         markdownEditor.value    = '';
         visualPreview.innerHTML = '';
         currentFileName = null;
         serverSavedPath = null;
         isServerDoc     = false;
         clearDirty();
+        batchStatus.classList.add('hidden');
+        setLoadingState('⏳ AI is processing your document...', 'Extracting text, tables, and formatting.');
         btnOpenFolder.classList.add('hidden');
         btnTabEdit.click();
         stepWorkspace.classList.add('hidden');

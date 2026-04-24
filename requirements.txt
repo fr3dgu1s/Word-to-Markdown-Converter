@@ -3,3 +3,6 @@ uvicorn
 python-multipart
 pillow
 docling
+msal
+requests
+pywin32

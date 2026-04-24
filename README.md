@@ -118,6 +118,37 @@ Preview renders Markdown with syntax highlighting and local image mapping to sim
 
 Click **Save** to persist changes directly to the `.md` file.
 
+### Protected Document Support (DLP)
+
+For protected `.docx` files, the app now uses a separate module that:
+
+1. Detects protection on the uploaded file
+2. Performs an **MSAL sign-in** using the current user identity
+3. Attempts to open and re-save an accessible copy via local Microsoft Word (only if user has rights)
+4. Converts the accessible copy to Markdown
+
+If the user does not have access rights, conversion is denied.
+
+---
+
+## 🔐 MSAL Configuration for Protected Files
+
+Set these environment variables before starting the server:
+
+- `MSAL_CLIENT_ID` (required): App registration client ID
+- `MSAL_TENANT_ID` (optional): Tenant ID or `organizations`
+- `MSAL_SCOPES` (optional): comma-separated scopes, default `User.Read`
+- `MSAL_CACHE_DIR` (optional): local folder for MSAL token cache
+
+Example (PowerShell):
+
+```powershell
+$env:MSAL_CLIENT_ID = "<your-app-client-id>"
+$env:MSAL_TENANT_ID = "organizations"
+```
+
+The app registration must allow delegated user sign-in and Microsoft Graph `User.Read` permission.
+
 ---
 
 ## 🔧 Troubleshooting
