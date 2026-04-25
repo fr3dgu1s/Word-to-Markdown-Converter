@@ -20,8 +20,7 @@ from protected_file_access import (
     run_protected_access_diagnostics,
     test_protected_file_access,
 )
-from rms_batch_pipeline import batch_convert_fast_with_progress
-from word_batch_pipeline import batch_convert as word_batch_convert
+from word_dispatch_pipeline import batch_convert as word_dispatch_batch_convert
 
 app = FastAPI()
 
@@ -295,60 +294,11 @@ async def convert_documents_batch(files: List[UploadFile] = File(...)):
 
 @app.post("/batch-convert")
 async def batch_convert_sse(data: dict = Body(...)):
-    input_folder = (data or {}).get("input_folder")
-    output_folder = (data or {}).get("output_folder")
-    max_workers = int((data or {}).get("max_workers", 4))
-
-    if not input_folder:
-        raise HTTPException(status_code=400, detail="input_folder is required.")
-    if not output_folder:
-        raise HTTPException(status_code=400, detail="output_folder is required.")
-    if max_workers < 1:
-        raise HTTPException(status_code=400, detail="max_workers must be >= 1.")
-
-    event_queue: "queue.Queue[dict | None]" = queue.Queue()
-
-    def _emit(event: dict) -> None:
-        event_queue.put(event)
-
-    def _run_batch() -> None:
-        try:
-            summary = batch_convert_fast_with_progress(
-                input_folder=input_folder,
-                output_folder=output_folder,
-                max_conversion_workers=max_workers,
-                progress_callback=_emit,
-            )
-            event_queue.put(summary)
-        except Exception as exc:
-            event_queue.put({"status": "failed", "error": str(exc)})
-        finally:
-            event_queue.put(None)
-
-    threading.Thread(target=_run_batch, daemon=True, name="batch-convert-sse").start()
-
-    async def _stream_events():
-        while True:
-            item = await asyncio.to_thread(event_queue.get)
-            if item is None:
-                break
-            yield f"data: {json.dumps(item)}\\n\\n"
-
-    return StreamingResponse(
-        _stream_events(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-        },
-    )
-
-@app.post("/api/batch-convert-word")
-async def batch_convert_word_sse(data: dict = Body(...)):
     """
-    Batch-convert DLP/IRM-protected .docx files using the authenticated Word session.
+    Batch-convert DLP/IRM-protected .docx files to Markdown.
 
-    Word handles RMS decryption; Docling converts the clean copy to Markdown.
+    Spawns a hidden Word instance once to handle RMS decryption, saves clean
+    temp copies, then converts them in parallel with Docling.
     Streams Server-Sent Events: one per file, then a final summary object.
 
     Body: { "input_folder": "...", "output_folder": "...", "max_workers": 4 }
@@ -370,46 +320,13 @@ async def batch_convert_word_sse(data: dict = Body(...)):
         event_queue.put(event)
 
     def _run_batch() -> None:
-        out_path = Path(output_folder)
-        images_dir = out_path / "Images"
-        images_dir.mkdir(parents=True, exist_ok=True)
-
-        def _docling_convert(temp_path: str) -> str:
-            from docling_core.types.doc import PictureItem  # noqa: PLC0415
-
-            # Derive a safe output name from the original stem (strip _clean suffix).
-            stem = Path(temp_path).stem
-            if stem.endswith("_clean"):
-                stem = stem[:-6]
-            safe_stem = sanitize_name(stem) or "document"
-            img_folder = images_dir / safe_stem
-            img_folder.mkdir(parents=True, exist_ok=True)
-
-            conv_res = _get_converter().convert(Path(temp_path))
-
-            pic_count = 0
-            for element, _ in conv_res.document.iterate_items():
-                if isinstance(element, PictureItem):
-                    pic_count += 1
-                    with (img_folder / f"image_{pic_count}.png").open("wb") as fp:
-                        element.get_image(conv_res.document).save(fp, "PNG")
-
-            raw_md = conv_res.document.export_to_markdown(
-                image_placeholder="IMAGE_TOKEN"
-            )
-            for i in range(1, pic_count + 1):
-                raw_md = raw_md.replace(
-                    "IMAGE_TOKEN",
-                    f"![image](Images/{safe_stem}/image_{i}.png)",
-                    1,
-                )
-            return raw_md
-
+        # Word COM must run on the thread that called CoInitialize — batch_convert
+        # handles start_word() and CoUninitialize internally, so this thread owns
+        # the COM apartment for the entire batch.
         try:
-            summary = word_batch_convert(
+            summary = word_dispatch_batch_convert(
                 input_folder=input_folder,
                 output_folder=output_folder,
-                docling_convert=_docling_convert,
                 max_workers=max_workers,
                 progress_callback=_emit,
             )
@@ -419,7 +336,7 @@ async def batch_convert_word_sse(data: dict = Body(...)):
         finally:
             event_queue.put(None)  # sentinel — terminates the SSE stream
 
-    threading.Thread(target=_run_batch, daemon=True, name="word-batch-sse").start()
+    threading.Thread(target=_run_batch, daemon=True, name="batch-convert-sse").start()
 
     async def _stream_events():
         while True:
@@ -436,7 +353,6 @@ async def batch_convert_word_sse(data: dict = Body(...)):
             "Connection": "keep-alive",
         },
     )
-
 
 if __name__ == "__main__":
     import uvicorn
