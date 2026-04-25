@@ -1,4 +1,7 @@
+import asyncio
+import json
 import os
+import queue
 import shutil
 import tempfile
 import re
@@ -9,7 +12,7 @@ from typing import List, Optional
 from fastapi import FastAPI, UploadFile, File, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 
 from protected_file_access import (
     convert_docx_with_docling_fallback,
@@ -17,6 +20,7 @@ from protected_file_access import (
     run_protected_access_diagnostics,
     test_protected_file_access,
 )
+from rms_batch_pipeline import batch_convert_fast_with_progress
 
 app = FastAPI()
 
@@ -286,6 +290,57 @@ async def convert_documents_batch(files: List[UploadFile] = File(...)):
         "skipped": skipped,
         "failed": failed,
     }
+
+
+@app.post("/batch-convert")
+async def batch_convert_sse(data: dict = Body(...)):
+    input_folder = (data or {}).get("input_folder")
+    output_folder = (data or {}).get("output_folder")
+    max_workers = int((data or {}).get("max_workers", 4))
+
+    if not input_folder:
+        raise HTTPException(status_code=400, detail="input_folder is required.")
+    if not output_folder:
+        raise HTTPException(status_code=400, detail="output_folder is required.")
+    if max_workers < 1:
+        raise HTTPException(status_code=400, detail="max_workers must be >= 1.")
+
+    event_queue: "queue.Queue[dict | None]" = queue.Queue()
+
+    def _emit(event: dict) -> None:
+        event_queue.put(event)
+
+    def _run_batch() -> None:
+        try:
+            summary = batch_convert_fast_with_progress(
+                input_folder=input_folder,
+                output_folder=output_folder,
+                max_conversion_workers=max_workers,
+                progress_callback=_emit,
+            )
+            event_queue.put(summary)
+        except Exception as exc:
+            event_queue.put({"status": "failed", "error": str(exc)})
+        finally:
+            event_queue.put(None)
+
+    threading.Thread(target=_run_batch, daemon=True, name="batch-convert-sse").start()
+
+    async def _stream_events():
+        while True:
+            item = await asyncio.to_thread(event_queue.get)
+            if item is None:
+                break
+            yield f"data: {json.dumps(item)}\\n\\n"
+
+    return StreamingResponse(
+        _stream_events(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        },
+    )
 
 if __name__ == "__main__":
     import uvicorn

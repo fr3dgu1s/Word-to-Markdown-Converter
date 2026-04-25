@@ -431,6 +431,42 @@ def cleanup_temporary_decrypted_file(temp_docx_path: str | Path) -> None:
         temp_path.unlink(missing_ok=True)
 
 
+def _extract_markdown_from_word_doc(doc: Any) -> str:
+    """Read paragraphs and tables from an open Word document and return Markdown."""
+    markdown_blocks: list[str] = []
+    processed_table_starts: set[int] = set()
+
+    for idx in range(1, int(doc.Content.Paragraphs.Count) + 1):
+        para = doc.Content.Paragraphs.Item(idx)
+
+        within_table = False
+        try:
+            within_table = bool(para.Range.Information(WD_INFO_WITHIN_TABLE))
+        except Exception:
+            within_table = False
+
+        if within_table:
+            try:
+                table = para.Range.Tables.Item(1)
+                table_start = int(table.Range.Start)
+            except Exception:
+                table = None
+                table_start = -1
+
+            if table is not None and table_start not in processed_table_starts:
+                processed_table_starts.add(table_start)
+                table_md = _table_to_markdown(table)
+                if table_md:
+                    markdown_blocks.append(table_md)
+            continue
+
+        para_md = _paragraph_to_markdown(para)
+        if para_md:
+            markdown_blocks.append(para_md)
+
+    return "\n\n".join(markdown_blocks).strip()
+
+
 def convert_protected_docx_to_md(docx_path: str) -> str:
     """Convert a protected .docx to Markdown directly from Word COM in-memory objects."""
     source_path = Path(docx_path).expanduser().resolve()
@@ -479,38 +515,7 @@ def convert_protected_docx_to_md(docx_path: str) -> str:
                 "with the current user session (possible rights/policy/authentication issue)."
             ) from exc
 
-        markdown_blocks: list[str] = []
-        processed_table_starts: set[int] = set()
-
-        for idx in range(1, int(doc.Content.Paragraphs.Count) + 1):
-            para = doc.Content.Paragraphs.Item(idx)
-
-            within_table = False
-            try:
-                within_table = bool(para.Range.Information(WD_INFO_WITHIN_TABLE))
-            except Exception:
-                within_table = False
-
-            if within_table:
-                try:
-                    table = para.Range.Tables.Item(1)
-                    table_start = int(table.Range.Start)
-                except Exception:
-                    table = None
-                    table_start = -1
-
-                if table is not None and table_start not in processed_table_starts:
-                    processed_table_starts.add(table_start)
-                    table_md = _table_to_markdown(table)
-                    if table_md:
-                        markdown_blocks.append(table_md)
-                continue
-
-            para_md = _paragraph_to_markdown(para)
-            if para_md:
-                markdown_blocks.append(para_md)
-
-        return "\n\n".join(markdown_blocks).strip()
+        return _extract_markdown_from_word_doc(doc)
     except RuntimeError:
         raise
     except Exception as exc:
@@ -533,22 +538,135 @@ def convert_protected_docx_to_md(docx_path: str) -> str:
                 pass
 
 
+def convert_protected_docx_via_visible_word(docx_path: str) -> str:
+    """
+    Convert a DLP/IRM-protected .docx by opening it in a visible Word window.
+
+    Strategy:
+      1. Attach to a running Word instance that already has the file open (user
+         has already authenticated — no extra prompt needed).
+      2. If not found, open Word visibly so the DLP/IRM auth dialog can appear
+         and the user can confirm their identity interactively.
+      3. Read and convert the document content via COM.
+      4. Leave Word open after reading (callers should not close it).
+    """
+    source_path = Path(docx_path).expanduser().resolve()
+    if not source_path.exists():
+        raise RuntimeError(f"Protected conversion failed: file not found: {source_path}")
+    if source_path.suffix.lower() != ".docx":
+        raise RuntimeError(f"Protected conversion failed: expected .docx, got: {source_path.name}")
+    if win32com is None or pythoncom is None:
+        raise RuntimeError(
+            "Protected conversion failed: pywin32 is required. "
+            "Install with `pip install pywin32` and ensure Microsoft Word is installed."
+        )
+
+    com_initialized = False
+    word = None
+    doc = None
+    word_was_already_running = False
+
+    try:
+        pythoncom.CoInitialize()
+        com_initialized = True
+
+        # Step 1: Try to attach to an already-running Word instance.
+        try:
+            word = win32com.client.GetActiveObject("Word.Application")
+            word_was_already_running = True
+        except Exception:
+            word = None
+
+        # Step 2: Check if the file is already open in the running instance.
+        if word is not None:
+            try:
+                for i in range(1, int(word.Documents.Count) + 1):
+                    try:
+                        candidate = word.Documents.Item(i)
+                        if Path(candidate.FullName).resolve() == source_path:
+                            doc = candidate
+                            break
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+
+        # Step 3: If not already open, launch Word visibly and open the file.
+        # The DLP/IRM auth dialog will appear on-screen so the user can sign in.
+        if doc is None:
+            if word is None:
+                try:
+                    word = win32com.client.DispatchEx("Word.Application")
+                except Exception as exc:
+                    raise RuntimeError(
+                        "Protected conversion failed: could not launch Word COM automation."
+                    ) from exc
+
+            word.Visible = True
+            word.DisplayAlerts = WD_ALERTS_NONE
+
+            try:
+                doc = word.Documents.Open(
+                    str(source_path),
+                    ReadOnly=True,
+                    ConfirmConversions=False,
+                    AddToRecentFiles=False,
+                    Visible=True,
+                )
+            except Exception as exc:
+                raise RuntimeError(
+                    "Protected conversion failed: Word could not open the document. "
+                    "Ensure you are signed in to Microsoft 365 in Word and that your account "
+                    "has access rights for this sensitivity label. "
+                    f"Underlying error: {exc}"
+                ) from exc
+
+        # Step 4: Read and convert — Word stays open after this returns.
+        return _extract_markdown_from_word_doc(doc)
+
+    except RuntimeError:
+        raise
+    except Exception as exc:
+        raise RuntimeError(f"Protected conversion failed unexpectedly: {exc}") from exc
+    finally:
+        # Never quit Word if it was already running before we attached.
+        # For sessions we launched: also leave Word open per user preference —
+        # closing it would dismiss the authenticated session.
+        if com_initialized:
+            try:
+                pythoncom.CoUninitialize()
+            except Exception:
+                pass
+
+
 def convert_docx_with_docling_fallback(
     docx_path: str,
     docling_to_markdown: Callable[[str], str],
 ) -> str:
-    """Try Docling first; on failure, fall back to Word COM protected conversion."""
+    """
+    Try Docling first, then silent Word COM, then visible Word (for DLP-protected files).
+
+    The visible Word path opens a Word window so the user can complete any
+    DLP/IRM authentication interactively before content is read.
+    """
     try:
         return docling_to_markdown(docx_path)
     except Exception as docling_exc:
+        silent_exc = None
         try:
             return convert_protected_docx_to_md(docx_path)
-        except Exception as protected_exc:
+        except Exception as exc:
+            silent_exc = exc
+
+        try:
+            return convert_protected_docx_via_visible_word(docx_path)
+        except Exception as visible_exc:
             raise RuntimeError(
-                "Both conversion paths failed. "
+                "All conversion paths failed. "
                 f"Docling error: {docling_exc}. "
-                f"Protected fallback error: {protected_exc}"
-            ) from protected_exc
+                f"Word (silent) error: {silent_exc}. "
+                f"Word (visible/DLP) error: {visible_exc}"
+            ) from visible_exc
 
 
 def decrypt_and_get_temp_path(protected_docx_path: str) -> str:
