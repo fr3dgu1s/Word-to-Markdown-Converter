@@ -56,10 +56,23 @@ public static class Program
             return RunProtect(input, output, meta, user);
         }, inputOption, outputOption, metadataOption, userOption);
 
+        var urlOption = new Option<string>("--url") { IsRequired = true };
+        var fetchUnprotect = new Command("fetch-unprotect",
+            "Fetch a protected SharePoint/OneDrive URL with user credentials and write a decrypted local copy.");
+        fetchUnprotect.AddOption(urlOption);
+        fetchUnprotect.AddOption(outputOption);
+        fetchUnprotect.AddOption(userOption);
+        fetchUnprotect.SetHandler((string url, FileInfo? output, string? user) =>
+        {
+            if (output == null) { Console.Error.WriteLine("--output is required for fetch-unprotect"); return Task.FromResult(99); }
+            return RunFetchUnprotect(url, output, user);
+        }, urlOption, outputOption, userOption);
+
         var root = new RootCommand("Word-to-Markdown MIP Helper");
         root.AddCommand(inspect);
         root.AddCommand(unprotect);
         root.AddCommand(protect);
+        root.AddCommand(fetchUnprotect);
 
         return await root.InvokeAsync(args);
     }
@@ -171,6 +184,32 @@ public static class Program
             Console.Error.WriteLine($"protect failed: {ex}");
             return 99;
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // fetch-unprotect (Graph 403 fallback path)
+    // -----------------------------------------------------------------------
+
+    private static Task<int> RunFetchUnprotect(string url, FileInfo output, string? user)
+    {
+        // TODO (MIP SDK):
+        //   1) Acquire a delegated token for the user via MSAL public client
+        //      (interactive or device-code) bound to the user's tenant.
+        //   2) Use the SharePoint/OneDrive REST path that the Office desktop
+        //      apps use: open the protected file stream with user creds and
+        //      call IFileHandler.RemoveProtectionAsync() to materialise a
+        //      decrypted copy at 'output'.
+        //   3) Return:
+        //        0  on success
+        //       20  when Purview denies access (UnauthorizedAccessException)
+        //       99  for any other failure
+        Console.Error.WriteLine(
+            "fetch-unprotect requires the MIP SDK plus an approved app registration. " +
+            "Complete onboarding at https://aka.ms/mipsdkapponboarding and replace this stub.");
+        Console.Error.WriteLine($"requested url: {url}");
+        Console.Error.WriteLine($"requested output: {output.FullName}");
+        Console.Error.WriteLine($"user: {user ?? "<none>"}");
+        return Task.FromResult(99);
     }
 
     // -----------------------------------------------------------------------

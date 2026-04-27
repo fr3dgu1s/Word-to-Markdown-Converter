@@ -185,6 +185,57 @@ def unprotect_file(
     return output_path
 
 
+def fetch_and_unprotect_url(
+    source_url: str,
+    user_upn: Optional[str] = None,
+    *,
+    timeout: int = 110,
+) -> Path:
+    """Ask the MIP helper to fetch a protected SharePoint/OneDrive URL with the
+    current user's Microsoft 365 credentials and produce a decrypted working
+    copy locally.
+
+    Used as a fallback when Microsoft Graph returns 403 / access denied on a
+    file that the signed-in user can still open via Word + MIP.
+
+    Returns:
+        Path to the decrypted working .docx in a private mip-fetch-* tempdir.
+
+    Raises:
+        MipAccessDeniedError when MIP/Purview denies access to the user.
+        MipHelperError for any other helper failure.
+    """
+    upn = user_upn or os.environ.get("MIP_USER_UPN", "")
+
+    work_dir = Path(tempfile.mkdtemp(prefix="mip-fetch-"))
+    output_path = work_dir / "fetched-working.docx"
+
+    args = [
+        "fetch-unprotect",
+        "--url", source_url,
+        "--output", str(output_path),
+    ]
+    if upn:
+        args += ["--user", upn]
+
+    rc, _stdout, stderr = _run_helper(args, timeout=timeout)
+
+    if rc == 20:
+        shutil.rmtree(work_dir, ignore_errors=True)
+        raise MipAccessDeniedError(
+            "Microsoft Purview denied access for the current user. "
+            "You do not have rights to view, edit, or export this file."
+        )
+
+    if rc != 0 or not output_path.exists():
+        shutil.rmtree(work_dir, ignore_errors=True)
+        raise MipHelperError(
+            f"MipHelper fetch-unprotect failed (rc={rc}): {stderr.strip() or '<no stderr>'}"
+        )
+
+    return output_path
+
+
 def reapply_protection(
     input_path: str | Path,
     metadata_path: str | Path,

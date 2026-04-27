@@ -33,6 +33,7 @@ from mip_helper_client import (
     unprotect_file as mip_unprotect_file,
     reapply_protection as mip_reapply_protection,
     cleanup_paths as mip_cleanup_paths,
+    fetch_and_unprotect_url as mip_fetch_and_unprotect_url,
     MipAccessDeniedError,
     MipReapplyFailedError,
     MipHelperError,
@@ -568,167 +569,166 @@ async def cloud_convert(data: dict = Body(...)):
         raise HTTPException(status_code=400, detail="Supply at least one of dest_sharepoint_url or local_output_dir.")
 
     start = time.time()
-    logger.info(f"[CONVERT] start | source={source_url}")
+    cleanup_paths: list[Path] = []
 
-    try:
-        # Step 1 — Get token (hard timeout)
-        auth = GraphAuthClient()
-        try:
-            token = await auth.get_token_async()
-            logger.info("[CONVERT] token acquired")
-        except Exception as e:
-            logger.error(f"[CONVERT] token failed | {e}")
-            raise HTTPException(status_code=401, detail=f"Authentication failed: {str(e)}")
+    BOTH_FAILED_MSG = (
+        "The file could not be converted. Cloud access failed, and "
+        "Microsoft Purview did not allow the app to open or export "
+        "the protected file."
+    )
+    TIMEOUT_MSG = "The conversion exceeded the 2-minute limit and was cancelled."
 
-        from graph_client import resolve_url, resolve_output_folder, download_file_bytes, upload_markdown  # noqa: PLC0415
+    async def _do_conversion() -> dict:
+        from graph_client import (  # noqa: PLC0415
+            resolve_url, resolve_output_folder, download_file_bytes, upload_markdown,
+        )
         from cloud_converter import _docx_bytes_to_markdown, is_protected  # noqa: PLC0415
 
-        # Step 2 — Resolve source URL
+        logger.info(f"[CLOUD] cloud_conversion_started | source={source_url}")
+
+        # ── Step 1 — Acquire delegated token via MSAL/Azure CLI ────────────
+        try:
+            token = await GraphAuthClient().get_token_async()
+            logger.info("[CLOUD] graph_token_acquired")
+        except Exception as e:
+            logger.error(f"[CLOUD] graph_token_acquired failed | {e}")
+            raise HTTPException(status_code=401, detail=f"Authentication failed: {e}")
+
+        # ── Step 2 — Try Graph fast path (resolve + download) ──────────────
+        file_bytes: Optional[bytes] = None
+        graph_failed_with_access = False
+        graph_error: Optional[Exception] = None
+
         try:
             drive_id, item_id = await asyncio.to_thread(resolve_url, source_url, token)
-            logger.info(f"[CONVERT] resolved source | drive={drive_id} item={item_id}")
-        except Exception as e:
-            logger.error(f"[CONVERT] resolve failed | {e}")
-            raise HTTPException(status_code=400, detail=f"Could not resolve source URL: {str(e)}")
-
-        # Step 3 — Download
-        try:
             file_bytes = await asyncio.to_thread(download_file_bytes, drive_id, item_id, token)
-            logger.info(f"[CONVERT] downloaded | {len(file_bytes)} bytes")
+            logger.info(f"[CLOUD] graph download ok | {len(file_bytes)} bytes")
+        except PermissionError as e:
+            graph_failed_with_access = True
+            graph_error = e
+            logger.warning(f"[CLOUD] graph_resolve_failed | access denied | {e}")
         except Exception as e:
-            logger.error(f"[CONVERT] download failed | {e}")
-            raise HTTPException(status_code=400, detail=f"Download failed: {str(e)}")
+            msg = str(e)
+            if "403" in msg or "401" in msg or "access" in msg.lower() or "denied" in msg.lower():
+                graph_failed_with_access = True
+                graph_error = e
+                logger.warning(f"[CLOUD] graph_resolve_failed | likely access denied | {e}")
+            else:
+                logger.error(f"[CLOUD] graph_resolve_failed | non-access error | {e}")
+                raise HTTPException(status_code=400, detail=f"Could not resolve source URL: {e}")
 
-        if is_protected(file_bytes):
-            logger.info(f"[CONVERT] protected detected | {source_url}")
-            tmp_dir = Path(tempfile.mkdtemp(prefix="mip-src-"))
-            tmp_input = tmp_dir / "source.docx"
-            tmp_input.write_bytes(file_bytes)
+        markdown: Optional[str] = None
+        used_mip = False
+        label_name: Optional[str] = None
 
-            meta = None
-            working = None
-            final = None
+        # ── Step 3 — Decide path: Graph success vs MIP fallback ────────────
+        if file_bytes is not None and not is_protected(file_bytes):
+            # Graph fast path — straight Docling conversion.
+            logger.info("[CLOUD] docling_conversion_started | path=graph")
             try:
-                # MIP step 1 — capture label/protection metadata.
-                try:
-                    meta = await asyncio.to_thread(mip_inspect_file, tmp_input)
-                    logger.info(
-                        f"[MIP] inspected | label={meta.label_name} id={meta.label_id} protected={meta.is_protected}"
-                    )
-                except MipHelperError as e:
-                    logger.error(f"[MIP] inspect failed | {e}")
-                    raise HTTPException(status_code=500, detail=f"MIP inspect failed: {e}")
+                markdown = await asyncio.to_thread(_docx_bytes_to_markdown, file_bytes)
+            except Exception as e:
+                logger.error(f"[CLOUD] docling failed | {e}\n{traceback.format_exc()}")
+                raise HTTPException(status_code=422, detail=f"Conversion failed: {e}")
 
-                # MIP step 2 — request a decrypted working copy.
-                try:
-                    working = await asyncio.to_thread(
-                        mip_unprotect_file, tmp_input, meta.metadata_path,
-                        os.environ.get("MIP_USER_UPN"),
-                    )
-                    logger.info(f"[MIP] decrypt allowed | working={working.name}")
-                except MipAccessDeniedError as e:
-                    logger.warning(f"[MIP] denied | {e}")
-                    raise HTTPException(
-                        status_code=422,
-                        detail=(
-                            "Access denied by Microsoft Purview policy. "
-                            "Your account does not have rights to view, edit, or export this file."
-                        ),
-                    )
-                except MipHelperError as e:
-                    logger.error(f"[MIP] unprotect failed | {e}")
-                    raise HTTPException(status_code=500, detail=f"MIP unprotect failed: {e}")
+        else:
+            # MIP fallback — either Graph 403'd, or download succeeded but
+            # bytes are protected (RMS/IRM envelope).
+            logger.info(
+                f"[CLOUD] mip_fallback_started | "
+                f"reason={'graph_403' if graph_failed_with_access else 'protected_payload'}"
+            )
 
-                # MIP step 3 — convert the decrypted working copy.
-                try:
-                    working_bytes = working.read_bytes()
-                    markdown = await asyncio.to_thread(_docx_bytes_to_markdown, working_bytes)
-                    logger.info(f"[CONVERT] edit completed | {len(markdown)} chars")
-                except Exception as e:
-                    logger.error(f"[CONVERT] protected conversion failed | {e}\n{traceback.format_exc()}")
-                    raise HTTPException(status_code=422, detail=f"Conversion failed: {str(e)}")
-
-                # MIP step 4 — write outputs. If uploading the .docx form back
-                # to SharePoint, we MUST reapply the original protection first.
-                raw_name = urllib.parse.unquote(source_url.rstrip("/").split("/")[-1])
-                stem = raw_name[:-5] if raw_name.lower().endswith(".docx") else raw_name
-                md_filename = f"{stem}.md"
-                results: dict = {
-                    "filename": md_filename,
-                    "sharepoint_url": None,
-                    "local_path": None,
-                    "protected": True,
-                    "label_name": meta.label_name,
-                }
-
-                if dest_sp_url:
-                    # The current pipeline uploads Markdown (an unprotected
-                    # text artifact) — we refuse this for protected sources to
-                    # avoid creating an unlabeled copy of confidential content.
-                    logger.warning("[MIP] refusing to upload markdown of a protected file")
-                    raise HTTPException(
-                        status_code=422,
-                        detail=(
-                            "Protected files cannot be exported to SharePoint as Markdown. "
-                            "Save locally instead, or extend the pipeline to upload an edited "
-                            ".docx with reapplied protection."
-                        ),
-                    )
-
-                if local_dir:
+            working_path: Optional[Path] = None
+            try:
+                if graph_failed_with_access:
+                    # Helper fetches with user creds and decrypts in one step.
                     try:
-                        out = Path(local_dir) / md_filename
-                        out.parent.mkdir(parents=True, exist_ok=True)
-                        out.write_text(markdown, encoding="utf-8")
-                        results["local_path"] = str(out)
-                        logger.info(f"[CONVERT] saved locally | {out}")
-                    except Exception as e:
-                        logger.error(f"[CONVERT] local save failed | {e}")
-                        raise HTTPException(status_code=500, detail=f"Local save failed: {str(e)}")
+                        working_path = await asyncio.to_thread(
+                            mip_fetch_and_unprotect_url,
+                            source_url,
+                            os.environ.get("MIP_USER_UPN"),
+                        )
+                    except MipAccessDeniedError as e:
+                        logger.warning(f"[CLOUD] mip_decrypt_denied | {e}")
+                        raise HTTPException(status_code=422, detail=BOTH_FAILED_MSG)
+                    except MipHelperError as e:
+                        logger.error(f"[CLOUD] mip_decrypt failed | {e}")
+                        raise HTTPException(status_code=422, detail=BOTH_FAILED_MSG)
+                else:
+                    # We have protected bytes locally — use inspect/unprotect.
+                    tmp_dir = Path(tempfile.mkdtemp(prefix="mip-src-"))
+                    cleanup_paths.append(tmp_dir)
+                    tmp_input = tmp_dir / "source.docx"
+                    tmp_input.write_bytes(file_bytes or b"")
+                    cleanup_paths.append(tmp_input)
 
-                elapsed = round((time.time() - start) * 1000)
-                logger.info(f"[CONVERT] done (protected) | {md_filename} | {elapsed}ms")
-                return {**results, "elapsed_ms": elapsed, "markdown": markdown}
+                    try:
+                        meta = await asyncio.to_thread(mip_inspect_file, tmp_input)
+                        cleanup_paths.append(meta.metadata_path)
+                        label_name = meta.label_name
+                        working_path = await asyncio.to_thread(
+                            mip_unprotect_file,
+                            tmp_input,
+                            meta.metadata_path,
+                            os.environ.get("MIP_USER_UPN"),
+                        )
+                    except MipAccessDeniedError as e:
+                        logger.warning(f"[CLOUD] mip_decrypt_denied | {e}")
+                        raise HTTPException(status_code=422, detail=BOTH_FAILED_MSG)
+                    except MipHelperError as e:
+                        logger.error(f"[CLOUD] mip_decrypt failed | {e}")
+                        raise HTTPException(status_code=422, detail=BOTH_FAILED_MSG)
 
-            finally:
+                cleanup_paths.append(working_path)
+                logger.info(f"[CLOUD] mip_decrypt_allowed | working={working_path.name}")
+                used_mip = True
+
+                logger.info("[CLOUD] docling_conversion_started | path=mip")
                 try:
-                    paths = [tmp_input, tmp_dir]
-                    if working is not None:
-                        paths.append(working)
-                    if final is not None:
-                        paths.append(final)
-                    if meta is not None:
-                        paths.append(meta.metadata_path)
-                    mip_cleanup_paths(*paths)
-                    logger.info("[MIP] cleanup done")
+                    working_bytes = working_path.read_bytes()
+                    markdown = await asyncio.to_thread(_docx_bytes_to_markdown, working_bytes)
                 except Exception as e:
-                    logger.warning(f"[MIP] cleanup error | {e}")
+                    logger.error(f"[CLOUD] docling failed (mip path) | {e}")
+                    raise HTTPException(status_code=422, detail=f"Conversion failed: {e}")
 
-        # Step 4 — Convert
-        try:
-            markdown = await asyncio.to_thread(_docx_bytes_to_markdown, file_bytes)
-            logger.info(f"[CONVERT] converted | {len(markdown)} chars")
-        except Exception as e:
-            logger.error(f"[CONVERT] conversion failed | {e}\n{traceback.format_exc()}")
-            raise HTTPException(status_code=422, detail=f"Conversion failed: {str(e)}")
+            except HTTPException:
+                raise
 
-        # Step 5 — Save outputs
+        # ── Step 4 — Save outputs ──────────────────────────────────────────
         raw_name = urllib.parse.unquote(source_url.rstrip("/").split("/")[-1])
         stem = raw_name[:-5] if raw_name.lower().endswith(".docx") else raw_name
         md_filename = f"{stem}.md"
-        results: dict = {"filename": md_filename, "sharepoint_url": None, "local_path": None}
+        results: dict = {
+            "filename": md_filename,
+            "sharepoint_url": None,
+            "local_path": None,
+            "protected": used_mip,
+            "label_name": label_name,
+            "fallback_used": "mip" if used_mip else "graph",
+        }
 
         if dest_sp_url:
+            if used_mip:
+                logger.warning("[CLOUD] refusing to upload markdown of a protected file")
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        "Protected files cannot be exported to SharePoint as "
+                        "Markdown (would create an unlabeled copy). Save locally instead."
+                    ),
+                )
             try:
-                dest_drive_id, dest_folder_id = await asyncio.to_thread(resolve_output_folder, dest_sp_url, token)
+                dest_drive_id, dest_folder_id = await asyncio.to_thread(
+                    resolve_output_folder, dest_sp_url, token
+                )
                 sp_url = await asyncio.to_thread(
                     upload_markdown, dest_drive_id, dest_folder_id, md_filename, markdown, token
                 )
                 results["sharepoint_url"] = sp_url
-                logger.info(f"[CONVERT] uploaded to SharePoint | {sp_url}")
             except Exception as e:
-                logger.error(f"[CONVERT] SharePoint upload failed | {e}")
-                raise HTTPException(status_code=500, detail=f"SharePoint upload failed: {str(e)}")
+                logger.error(f"[CLOUD] sharepoint upload failed | {e}")
+                raise HTTPException(status_code=500, detail=f"SharePoint upload failed: {e}")
 
         if local_dir:
             try:
@@ -736,24 +736,40 @@ async def cloud_convert(data: dict = Body(...)):
                 out.parent.mkdir(parents=True, exist_ok=True)
                 out.write_text(markdown, encoding="utf-8")
                 results["local_path"] = str(out)
-                logger.info(f"[CONVERT] saved locally | {out}")
             except Exception as e:
-                logger.error(f"[CONVERT] local save failed | {e}")
-                raise HTTPException(status_code=500, detail=f"Local save failed: {str(e)}")
+                logger.error(f"[CLOUD] local save failed | {e}")
+                raise HTTPException(status_code=500, detail=f"Local save failed: {e}")
 
         elapsed = round((time.time() - start) * 1000)
-        logger.info(f"[CONVERT] done | {md_filename} | {elapsed}ms")
+        logger.info(
+            f"[CLOUD] conversion_completed | path={'mip' if used_mip else 'graph'} | "
+            f"file={md_filename} | {elapsed}ms"
+        )
         return {**results, "elapsed_ms": elapsed, "markdown": markdown}
 
+    # ── 120s hard timeout wrapping the whole pipeline ──────────────────────
+    try:
+        return await asyncio.wait_for(_do_conversion(), timeout=120)
+    except asyncio.TimeoutError:
+        elapsed = round((time.time() - start) * 1000)
+        logger.error(f"[CLOUD] conversion_timeout | {elapsed}ms | source={source_url}")
+        raise HTTPException(status_code=408, detail=TIMEOUT_MSG)
     except HTTPException:
         raise
     except Exception as e:
         elapsed = round((time.time() - start) * 1000)
-        logger.exception(f"[CONVERT] unhandled error | {elapsed}ms | {e}")
+        logger.exception(f"[CLOUD] unhandled error | {elapsed}ms | {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Unexpected error: {str(e)}\n{traceback.format_exc()}",
+            detail=f"Unexpected error: {e}\n{traceback.format_exc()}",
         )
+    finally:
+        if cleanup_paths:
+            try:
+                mip_cleanup_paths(*cleanup_paths)
+                logger.info("[CLOUD] cleanup_completed")
+            except Exception as e:
+                logger.warning(f"[CLOUD] cleanup error | {e}")
 
 
 # ---------------------------------------------------------------------------

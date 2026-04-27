@@ -1157,8 +1157,14 @@ async function cloudConvertSingle() {
 
         if (!res.ok) {
             const msg = (data && data.detail) ? data.detail : `HTTP ${res.status}`;
-            // Map MIP-related 422s to UI states.
-            if (res.status === 422 && /purview|denied|rights|access/i.test(msg)) {
+            // Map MIP-related 422s and 408 timeout to UI states.
+            if (res.status === 408 || /2-minute|exceeded.*limit/i.test(msg)) {
+                setCloudStateBadge('reapply-failed');
+                logCloudLine(msg, 'fail');
+            } else if (res.status === 422 && /could not be converted.*Purview|cloud access failed/i.test(msg)) {
+                setCloudStateBadge('protected-denied');
+                logCloudLine(msg, 'fail');
+            } else if (res.status === 422 && /purview|denied|rights|access/i.test(msg)) {
                 setCloudStateBadge('protected-denied');
                 logCloudLine('Access denied by Microsoft Purview policy.', 'fail');
             } else if (res.status === 422 && /reappl|protection.*could not/i.test(msg)) {
@@ -1180,16 +1186,10 @@ async function cloudConvertSingle() {
         }
 
         // Success path. Surface the protected-file workflow when applicable.
-        if (data.protected) {
+        if (data.protected || data.fallback_used === 'mip') {
             setCloudStateBadge('protected-allowed');
-            setCloudProgress(true, 'Protected file detected. Checking permissions...', 45);
-            logCloudLine('Protected file detected. Checking permissions...');
-            logCloudLine('Creating protected-file working copy...');
-            logCloudLine('Editing working copy...');
-            if (data.sharepoint_url) {
-                logCloudLine('Reapplying original protection...');
-                logCloudLine('Uploading protected output...');
-            }
+            logCloudLine('Cloud access failed — used Microsoft Purview fallback.', 'ok');
+            logCloudLine('Protected file decrypted with your credentials.', 'ok');
             if (data.label_name) {
                 logCloudLine('Sensitivity label: ' + data.label_name, 'ok');
             }
