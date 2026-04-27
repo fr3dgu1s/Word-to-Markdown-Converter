@@ -5,6 +5,7 @@ All functions take an explicit `token` string (Bearer) so they are stateless
 and can be called from any thread without sharing auth state.
 """
 
+import base64
 import logging
 import re
 import time
@@ -119,6 +120,42 @@ def _item_by_path(drive_id: str, server_relative_path: str, token: str) -> dict:
     return _get(url, token)
 
 
+def _share_id_from_url(url: str) -> str:
+    encoded = base64.urlsafe_b64encode(url.encode("utf-8")).decode("ascii")
+    encoded = encoded.rstrip("=")
+    return f"u!{encoded}"
+
+
+def _is_share_link(parsed) -> bool:
+    host = (parsed.netloc or "").lower()
+    path = parsed.path or ""
+    return host.endswith(".sharepoint.com") and path.startswith("/:") or host == "onedrive.cloud.microsoft"
+
+
+def _resolve_share_url(url: str, token: str) -> tuple[str, str]:
+    share_id = _share_id_from_url(url)
+    item = _get(
+        f"{GRAPH_BASE}/shares/{share_id}/driveItem",
+        token,
+        params={"$select": "id,name,parentReference,remoteItem"},
+    )
+
+    item_id = item.get("id")
+    parent_reference = item.get("parentReference") or {}
+    drive_id = parent_reference.get("driveId")
+
+    remote_item = item.get("remoteItem") or {}
+    if not item_id and remote_item:
+        item_id = remote_item.get("id")
+        parent_reference = remote_item.get("parentReference") or parent_reference
+        drive_id = parent_reference.get("driveId") or drive_id
+
+    if not item_id or not drive_id:
+        raise ValueError(f"Could not resolve shared OneDrive/SharePoint URL: {url!r}")
+
+    return drive_id, item_id
+
+
 def resolve_url(url: str, token: str) -> tuple[str, str]:
     """
     Resolve a SharePoint or OneDrive URL to (drive_id, item_id).
@@ -134,9 +171,12 @@ def resolve_url(url: str, token: str) -> tuple[str, str]:
     parsed = urlparse(url)
     hostname = parsed.netloc.lower()
 
+    if _is_share_link(parsed):
+        return _resolve_share_url(url, token)
+
     if not hostname.endswith(".sharepoint.com"):
         raise ValueError(
-            f"Unsupported URL: {url!r}. Only *.sharepoint.com URLs are supported."
+            f"Unsupported URL: {url!r}. Supported URLs include *.sharepoint.com and OneDrive share links."
         )
 
     m = _SP_SITE_RE.match(url)
