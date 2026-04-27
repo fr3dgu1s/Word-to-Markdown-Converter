@@ -63,46 +63,75 @@ class MipMetadata:
     is_protected: bool
 
 
+def _copy_publish_dir(src_dir: Path, dest_dir: Path) -> None:
+    """Recursively copy a published .NET output to ``dest_dir`` (overwrite)."""
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    for entry in src_dir.rglob("*"):
+        rel = entry.relative_to(src_dir)
+        target = dest_dir / rel
+        if entry.is_dir():
+            target.mkdir(parents=True, exist_ok=True)
+        else:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(entry, target)
+
+
 def _resolve_helper_path() -> str:
-    """Locate MipHelper.exe.
+    """Locate MipHelper.exe with its full framework-dependent publish payload.
+
+    The C# helper is published as framework-dependent for ``win-x64``, so it
+    needs ``MipHelper.dll``, ``MipHelper.deps.json``,
+    ``MipHelper.runtimeconfig.json``, and the dependency DLLs alongside the
+    .exe. Copying only the .exe is not enough.
 
     Resolution order:
-      1. MIP_HELPER_PATH (env / .env, default ``C:/temp/W2MD/MipHelper/MipHelper.exe``).
-      2. ``MIP_HELPER_ROOT/MipHelper.exe`` (default ``C:/temp/W2MD/MipHelper``).
-      3. Repo-relative published helper:
-         ``MipHelper/bin/Release/net8.0/win-x64/publish/MipHelper.exe`` (or non-RID variant).
-      4. If only the repo-relative helper exists, copy it to MIP_HELPER_ROOT so
-         subsequent calls find it via step 1/2 — keeps everything portable.
+      1. ``MIP_HELPER_PATH`` (env / .env, default
+         ``C:/temp/W2MD/MipHelper/MipHelper.exe``) — return if its sibling
+         ``MipHelper.dll`` is also present.
+      2. ``MIP_HELPER_ROOT/MipHelper.exe`` (default
+         ``C:/temp/W2MD/MipHelper/MipHelper.exe``) — same payload check.
+      3. Repo-relative publish folder
+         (``MipHelper/bin/Release/net8.0/win-x64/publish``). If found, copy
+         the **entire** folder contents to ``MIP_HELPER_ROOT`` and return
+         the centralized .exe path.
     """
-    if MIP_HELPER_PATH.exists():
+
+    def _payload_complete(exe_path: Path) -> bool:
+        return exe_path.exists() and (exe_path.parent / "MipHelper.dll").exists()
+
+    if _payload_complete(MIP_HELPER_PATH):
         return str(MIP_HELPER_PATH)
 
     central = MIP_HELPER_ROOT / "MipHelper.exe"
-    if central.exists():
+    if _payload_complete(central):
         return str(central)
 
     repo_root = Path(__file__).resolve().parent
-    repo_candidates = [
-        repo_root / "MipHelper" / "bin" / "Release" / "net8.0" / "win-x64" / "publish" / "MipHelper.exe",
-        repo_root / "MipHelper" / "bin" / "Release" / "net8.0" / "publish" / "MipHelper.exe",
-        repo_root / "MipHelper" / "bin" / "Release" / "net8.0" / "MipHelper.exe",
-        repo_root / "MipHelper" / "bin" / "Debug" / "net8.0" / "MipHelper.exe",
+    publish_candidates = [
+        repo_root / "MipHelper" / "bin" / "Release" / "net8.0" / "win-x64" / "publish",
+        repo_root / "MipHelper" / "bin" / "Release" / "net8.0" / "publish",
     ]
-    for candidate in repo_candidates:
-        if candidate.exists():
+    for publish_dir in publish_candidates:
+        publish_exe = publish_dir / "MipHelper.exe"
+        publish_dll = publish_dir / "MipHelper.dll"
+        if publish_exe.exists() and publish_dll.exists():
             try:
-                MIP_HELPER_ROOT.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(candidate, central)
-                logger.info(f"[MIP] copied helper to {central}")
+                _copy_publish_dir(publish_dir, MIP_HELPER_ROOT)
+                logger.info(
+                    f"[MIP] copied publish payload {publish_dir} -> {MIP_HELPER_ROOT}"
+                )
                 return str(central)
             except Exception as exc:
-                logger.warning(f"[MIP] could not copy helper to {central}: {exc}")
-                return str(candidate)
+                logger.warning(
+                    f"[MIP] could not copy publish payload to {MIP_HELPER_ROOT}: {exc}. "
+                    "Executing in place."
+                )
+                return str(publish_exe)
 
     raise MipHelperError(
-        "MipHelper.exe was not found. Run scripts/setup-windows.ps1 or "
-        "publish the helper and copy it to "
-        f"{(MIP_HELPER_ROOT / 'MipHelper.exe').as_posix()}."
+        "MipHelper publish output was not found. Run scripts/setup-windows.ps1 "
+        "or dotnet publish ./MipHelper/MipHelper.csproj -c Release -r win-x64 "
+        "--self-contained false."
     )
 
 

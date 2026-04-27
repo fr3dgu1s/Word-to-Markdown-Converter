@@ -35,14 +35,21 @@
   </PropertyGroup>
 
   <Target Name="CopyToW2MDHelperRoot" AfterTargets="Publish">
+    <ItemGroup>
+      <_W2MDPublishFiles Include="$(PublishDir)**\*" />
+    </ItemGroup>
     <MakeDir Directories="$(W2MDHelperRoot)" />
-    <Copy SourceFiles="$(PublishDir)MipHelper.exe"
-          DestinationFolder="$(W2MDHelperRoot)"
-          SkipUnchangedFiles="false"
-          Condition="Exists('$(PublishDir)MipHelper.exe')" />
+    <!--
+      Framework-dependent publish: copy MipHelper.exe, MipHelper.dll,
+      MipHelper.deps.json, MipHelper.runtimeconfig.json, and every
+      dependency DLL into the portable runtime folder so the helper can
+      execute outside the build tree.
+    -->
+    <Copy SourceFiles="@(_W2MDPublishFiles)"
+          DestinationFiles="@(_W2MDPublishFiles->'$(W2MDHelperRoot)\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="false" />
     <Message Importance="high"
-             Text="MipHelper.exe copied to $(W2MDHelperRoot)\MipHelper.exe"
-             Condition="Exists('$(PublishDir)MipHelper.exe')" />
+             Text="MipHelper publish payload copied to $(W2MDHelperRoot)" />
   </Target>
 
 </Project>

@@ -69,14 +69,18 @@ if (-not $SkipPublish) {
         throw "dotnet publish failed (exit code $LASTEXITCODE)."
     }
 
-    $publishedExe = Join-Path $RepoRoot 'MipHelper\bin\Release\net8.0\win-x64\publish\MipHelper.exe'
-    $destExe = Join-Path $AppDataRoot 'MipHelper\MipHelper.exe'
+    $publishDir = Join-Path $RepoRoot 'MipHelper\bin\Release\net8.0\win-x64\publish'
+    $destDir = Join-Path $AppDataRoot 'MipHelper'
 
-    if (Test-Path $publishedExe) {
-        Copy-Item $publishedExe $destExe -Force
-        Write-Host "  Copied MipHelper.exe -> $destExe"
+    if (Test-Path $publishDir) {
+        # The helper is framework-dependent: it needs MipHelper.dll,
+        # MipHelper.deps.json, MipHelper.runtimeconfig.json, and every
+        # dependency DLL alongside MipHelper.exe. Copy the WHOLE publish
+        # folder, not just the .exe.
+        Copy-Item "$publishDir\*" $destDir -Recurse -Force
+        Write-Host "  Copied publish payload -> $destDir"
     } else {
-        Write-Warning "Published MipHelper.exe not found at $publishedExe. The post-publish target may have copied it already."
+        Write-Warning "Publish directory not found at $publishDir."
     }
 } else {
     Write-Step "Skipping MipHelper publish (--SkipPublish)"
@@ -84,13 +88,15 @@ if (-not $SkipPublish) {
 
 Write-Step "Validating final layout"
 $destExe = Join-Path $AppDataRoot 'MipHelper\MipHelper.exe'
+$destDll = Join-Path $AppDataRoot 'MipHelper\MipHelper.dll'
 foreach ($f in $Folders) {
     if (-not (Test-Path $f)) { Write-Warning "Missing: $f" }
 }
-if (Test-Path $destExe) {
+if ((Test-Path $destExe) -and (Test-Path $destDll)) {
     Write-Host "  MipHelper.exe : $destExe"
+    Write-Host "  MipHelper.dll : $destDll"
 } else {
-    Write-Warning "  MipHelper.exe missing at $destExe"
+    Write-Warning "  MipHelper publish payload missing in $((Join-Path $AppDataRoot 'MipHelper'))"
     Write-Warning "  Run: dotnet publish .\MipHelper\MipHelper.csproj -c Release -r win-x64 --self-contained false"
 }
 
