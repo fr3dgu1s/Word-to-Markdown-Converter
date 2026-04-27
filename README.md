@@ -32,11 +32,29 @@ The first run downloads Docling model assets (one-time, ~hundreds of MB).
 
 ## Run
 
+The easiest way to start the app is the silent launcher — no terminal
+required:
+
+1. Double-click [launch_silent.vbs](launch_silent.vbs) (or right-click →
+   *Open*).
+2. A loading page opens in your default browser. It polls the server and
+   automatically redirects to <http://127.0.0.1:8000> as soon as the
+   converter is ready.
+
+The launcher starts the Python server in the background using `pyw` /
+`pythonw`, so no console window is shown. To stop the app, either click
+**Stop Python App** in the UI or double-click
+[stop_silent.vbs](stop_silent.vbs).
+
+### Manual start (optional)
+
+If you prefer a terminal (e.g. for development or to see live logs):
+
 ```powershell
 python -m uvicorn server:app
 ```
 
-Open <http://127.0.0.1:8000>.
+Then open <http://127.0.0.1:8000>.
 
 ## Default folders
 
@@ -118,8 +136,12 @@ exported from Word:
 
 ## Stopping the server
 
-Click **Stop Python App** in the top bar — or press `Ctrl+C` in the terminal
-running `uvicorn`.
+You have three options:
+
+- Click **Stop Python App** in the top bar of the UI.
+- Double-click [stop_silent.vbs](stop_silent.vbs).
+- Press `Ctrl+C` in the terminal if you started the server manually with
+  `uvicorn`.
 
 ## Logs
 
@@ -131,8 +153,9 @@ running `uvicorn`.
 
 | Symptom | Fix |
 | --- | --- |
-| `Failed to fetch` in the browser | Server not running — start it again with `python -m uvicorn server:app`. |
-| Port already in use | Stop the previous instance: `taskkill /F /IM python.exe`, or pick a different port: `python -m uvicorn server:app --port 8001`. |
+| `Failed to fetch` in the browser | Server not running — re-launch with [launch_silent.vbs](launch_silent.vbs) (or `python -m uvicorn server:app`). |
+| Port already in use | Stop the previous instance with [stop_silent.vbs](stop_silent.vbs) or `taskkill /F /IM pythonw.exe`. For manual mode, pick another port: `python -m uvicorn server:app --port 8001`. |
+| Browser opens the loading page but never redirects | The Docling first-run model download is still in progress — wait a minute and refresh. Check `C:/temp/W2MD/Logs/app.log` if it persists. |
 | `Document converter failed to initialise` | Re-run `python -m pip install -r requirements.txt`. The first run downloads Docling models — make sure you have internet access. |
 | `.docx` won't open / "file already in use" | Close the document in Microsoft Word and try again. |
 | Encrypted / IRM-protected `.docx` fails | This app is local-only and does not handle protected files. Decrypt the document in Word first (open it, save a copy as `.docx`), then convert that copy. |
