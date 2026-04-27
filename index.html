@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PM Spec Converter (1.0)</title>
+    <title>Word to MD — Easy Converter</title>
 
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
@@ -11,274 +11,488 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
 
     <style>
-        /* --- BASE --- */
-        body { font-family: system-ui, -apple-system, sans-serif; max-width: 960px; margin: 2rem auto; padding: 0 1rem; background-color: #f0f2f5; color: #1a1a1a; }
-        .card { background: white; padding: 2rem; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); margin-bottom: 1rem; }
+        /* ── Design tokens ──────────────────────────────────────────────────── */
+        :root {
+            --color-bg:          #f0f2f5;
+            --color-surface:     #ffffff;
+            --color-surface-alt: #f7f9fc;
+            --color-border:      #e2e8f0;
+            --color-text:        #1a202c;
+            --color-text-muted:  #4a5568;
+            --color-primary:     #2563eb;
+            --color-primary-h:   #1d4ed8;
+            --color-danger:      #dc2626;
+            --color-danger-h:    #b91c1c;
+            --color-success:     #16a34a;
+            --color-warn-bg:     #fffbeb;
+            --color-warn-border: #fde68a;
+            --color-warn-text:   #92400e;
+            --radius-sm:  6px;
+            --radius-md: 10px;
+            --radius-lg: 16px;
+            --shadow-card: 0 2px 8px rgba(0,0,0,0.07);
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --color-bg:          #0f1117;
+                --color-surface:     #1a1d27;
+                --color-surface-alt: #21263a;
+                --color-border:      #2d3748;
+                --color-text:        #e2e8f0;
+                --color-text-muted:  #a0aec0;
+                --color-primary:     #3b82f6;
+                --color-primary-h:   #60a5fa;
+                --color-danger:      #ef4444;
+                --color-danger-h:    #f87171;
+                --color-success:     #22c55e;
+                --color-warn-bg:     #1c1400;
+                --color-warn-border: #78350f;
+                --color-warn-text:   #fbbf24;
+                --shadow-card: 0 2px 8px rgba(0,0,0,0.4);
+            }
+        }
+
+        /* ── Reset & base ───────────────────────────────────────────────────── */
+        *, *::before, *::after { box-sizing: border-box; }
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            max-width: 980px; margin: 0 auto; padding: 1.5rem 1rem;
+            background: var(--color-bg); color: var(--color-text);
+        }
+        .card {
+            background: var(--color-surface);
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-card);
+            padding: 1.75rem;
+            margin-bottom: 1rem;
+        }
         .hidden { display: none !important; }
+        input, textarea, select { color: var(--color-text); background: var(--color-surface); }
 
-        .top-shutdown { display: flex; justify-content: flex-end; margin-bottom: 0.35rem; }
-        .top-shutdown-link {
-            background: none;
-            border: none;
-            padding: 0;
-            color: red;
-            font-size: 0.95rem;
-            font-weight: 600;
-            cursor: pointer;
+        /* ── Top bar ────────────────────────────────────────────────────────── */
+        .top-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
+        .top-shutdown {
+            background: none; border: none; padding: 0;
+            color: var(--color-danger); font-size: 0.88rem; font-weight: 600; cursor: pointer;
         }
-        .top-shutdown-link:hover { text-decoration: underline; }
+        .top-shutdown:hover { text-decoration: underline; }
 
-        .hero-banner { display: flex; align-items: center; justify-content: space-between; gap: 1.5rem; margin-bottom: 1.5rem; padding: 1.25rem 1.5rem; border-radius: 16px; background: linear-gradient(135deg, #f7f9ff 0%, #eef7ff 45%, #f9f3ff 100%); border: 1px solid #e6ebf5; }
-        .hero-copy h1 { margin: 0; font-size: 2rem; line-height: 1.1; }
-        .hero-subtitle { margin: 0.5rem 0 0; font-size: 1.05rem; color: #4b5563; }
-        .hero-logo { flex: 0 0 240px; max-width: 240px; }
+        /* ── Hero ───────────────────────────────────────────────────────────── */
+        .hero-banner {
+            display: flex; align-items: center; justify-content: space-between;
+            gap: 1.5rem; margin-bottom: 1.5rem; padding: 1.25rem 1.5rem;
+            border-radius: var(--radius-lg);
+            background: linear-gradient(135deg, var(--color-surface-alt) 0%, var(--color-bg) 100%);
+            border: 1px solid var(--color-border);
+        }
+        .hero-copy h1 { margin: 0; font-size: 1.75rem; line-height: 1.1; }
+        .hero-subtitle { margin: 0.4rem 0 0; font-size: 1rem; color: var(--color-text-muted); }
+        .hero-logo { flex: 0 0 180px; }
         .hero-logo img { width: 100%; height: auto; display: block; }
-
-        @media (max-width: 720px) {
+        @media (max-width: 680px) {
             .hero-banner { flex-direction: column; text-align: center; }
-            .hero-logo { max-width: 200px; }
+            .hero-logo { max-width: 140px; }
         }
 
-        /* --- UPLOAD --- */
-        .upload-area { border: 2px dashed #ccc; border-radius: 8px; padding: 4rem 2rem; text-align: center; background: #fafafa; cursor: pointer; transition: all 0.3s ease; }
-        .upload-area:hover { border-color: #0066cc; background: #f0f7ff; }
-        .upload-area.dragover { border-color: #28a745; background: #e8f5e9; transform: scale(1.02); }
-        .loader { text-align: center; padding: 3rem; font-size: 1.2rem; color: #555; }
-        .upload-actions { margin-top: 1rem; display: flex; gap: 0.6rem; justify-content: center; flex-wrap: wrap; }
-        .upload-actions button { border: 1px solid #c7cfdb; background: #fff; color: #1f2937; border-radius: 8px; padding: 0.55rem 0.95rem; font-weight: 700; cursor: pointer; }
-        .upload-actions button:hover { background: #eef4ff; border-color: #9fb4d8; }
-        .batch-status { margin-top: 1rem; border: 1px solid #d5dfef; border-radius: 8px; background: #f7fbff; padding: 0.85rem 1rem; font-size: 0.9rem; color: #253147; }
-        .batch-status strong { color: #0b4c9d; }
+        /* ── Mode selector ──────────────────────────────────────────────────── */
+        .mode-tabs { display: flex; gap: 0; margin-bottom: 1.25rem; border-radius: var(--radius-md); overflow: hidden; border: 1px solid var(--color-border); }
+        .mode-tab {
+            flex: 1; padding: 0.75rem 1rem; font-size: 0.95rem; font-weight: 600;
+            cursor: pointer; border: none; background: var(--color-surface-alt);
+            color: var(--color-text-muted); transition: background 0.15s, color 0.15s;
+            text-align: center;
+        }
+        .mode-tab + .mode-tab { border-left: 1px solid var(--color-border); }
+        .mode-tab.active { background: var(--color-primary); color: #fff; }
+        .mode-tab:not(.active):hover { background: var(--color-border); }
+
+        /* ── Upload zone ────────────────────────────────────────────────────── */
+        .upload-area {
+            border: 2px dashed var(--color-border); border-radius: var(--radius-md);
+            padding: 3rem 2rem; text-align: center;
+            background: var(--color-surface-alt); cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .upload-area:hover { border-color: var(--color-primary); background: var(--color-bg); }
+        .upload-area.dragover { border-color: var(--color-success); background: var(--color-bg); transform: scale(1.01); }
+        .upload-area h3 { margin-top: 0; color: var(--color-text); }
+        .upload-area p  { color: var(--color-text-muted); margin: 0.25rem 0 1rem; }
+
+        .upload-actions { display: flex; gap: 0.5rem; justify-content: center; flex-wrap: wrap; }
+        .upload-actions button {
+            border: 1px solid var(--color-border); background: var(--color-surface);
+            color: var(--color-text); border-radius: var(--radius-sm);
+            padding: 0.5rem 0.9rem; font-weight: 600; cursor: pointer; font-size: 0.85rem;
+        }
+        .upload-actions button:hover { border-color: var(--color-primary); color: var(--color-primary); }
+
+        /* ── Batch status ───────────────────────────────────────────────────── */
+        .batch-status {
+            margin-top: 1rem; border: 1px solid var(--color-border);
+            border-radius: var(--radius-sm);
+            background: var(--color-surface-alt); padding: 0.85rem 1rem;
+            font-size: 0.88rem; color: var(--color-text);
+        }
+        .batch-status strong { color: var(--color-primary); }
         .batch-status ul { margin: 0.5rem 0 0; padding-left: 1.1rem; }
+        .batch-status .dlp-warn {
+            margin-top: 0.6rem; padding: 0.55rem 0.8rem;
+            background: var(--color-warn-bg); border: 1px solid var(--color-warn-border);
+            color: var(--color-warn-text); border-radius: var(--radius-sm); font-size: 0.83rem;
+        }
 
-        /* --- WORKSPACE HEADER --- */
-        .editor-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; border-bottom: 2px solid #eee; padding-bottom: 1rem; flex-wrap: wrap; gap: 0.5rem; }
-        .tabs { display: flex; gap: 0.5rem; }
-        .tab-btn { background: transparent; color: #555; border: none; padding: 0.5rem 1rem; font-weight: bold; cursor: pointer; border-radius: 6px; font-size: 0.9rem; }
-        .tab-btn.active { background: #e4e6eb; color: #000; }
+        /* ── Loader ─────────────────────────────────────────────────────────── */
+        .loader { text-align: center; padding: 3rem; font-size: 1.1rem; color: var(--color-text-muted); }
 
-        /* Action Buttons */
-        .action-btns { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
-        .action-btns button { border: none; padding: 0.45rem 0.9rem; border-radius: 6px; font-weight: bold; cursor: pointer; transition: background 0.2s; font-size: 0.82rem; }
-        .action-btns button.primary   { background: #0066cc; color: white; }
-        .action-btns button.primary:hover { background: #0052a3; }
-        .action-btns button.secondary { background: transparent; color: #555; border: 1px solid #ccc; }
-        .action-btns button.secondary:hover { background: #eee; }
-        .action-btns button.danger    { background: transparent; color: #d9534f; border: 1px solid #d9534f; }
-        .action-btns button.danger:hover { background: #d9534f; color: white; }
+        /* ── Warm-up banner ─────────────────────────────────────────────────── */
+        .warmup-bar {
+            display: flex; align-items: center; gap: 0.55rem;
+            background: var(--color-warn-bg); border: 1px solid var(--color-warn-border);
+            color: var(--color-warn-text); border-radius: var(--radius-sm);
+            padding: 0.5rem 0.9rem; font-size: 0.85rem; margin-bottom: 0.75rem;
+        }
+        .spin { display: inline-block; width: 14px; height: 14px; flex-shrink: 0;
+            border: 2px solid currentColor; border-top-color: transparent;
+            border-radius: 50%; animation: spin 0.8s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
 
-        /* --- TOOLBAR --- */
+        /* ── Workspace ───────────────────────────────────────────────────────── */
+        .editor-header {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 1rem; border-bottom: 1px solid var(--color-border);
+            padding-bottom: 1rem; flex-wrap: wrap; gap: 0.5rem;
+        }
+        .tabs { display: flex; gap: 0.4rem; }
+        .tab-btn {
+            background: transparent; color: var(--color-text-muted); border: none;
+            padding: 0.45rem 0.9rem; font-weight: 600; cursor: pointer;
+            border-radius: var(--radius-sm); font-size: 0.88rem;
+        }
+        .tab-btn.active { background: var(--color-border); color: var(--color-text); }
+
+        .action-btns { display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap; }
+        .action-btns button {
+            border: none; padding: 0.42rem 0.85rem; border-radius: var(--radius-sm);
+            font-weight: 600; cursor: pointer; font-size: 0.82rem; transition: background 0.15s;
+        }
+        .btn-primary   { background: var(--color-primary);   color: #fff; }
+        .btn-primary:hover { background: var(--color-primary-h); }
+        .btn-secondary { background: transparent; color: var(--color-text-muted); border: 1px solid var(--color-border) !important; }
+        .btn-secondary:hover { background: var(--color-border); }
+        .btn-danger    { background: transparent; color: var(--color-danger); border: 1px solid var(--color-danger) !important; }
+        .btn-danger:hover { background: var(--color-danger); color: #fff; }
+
+        /* ── Toolbar ─────────────────────────────────────────────────────────── */
         .toolbar {
-            display: flex;
-            gap: 2px;
-            flex-wrap: wrap;
-            align-items: center;
-            padding: 6px 8px;
-            background: #f5f5f5;
-            border: 1px solid #ddd;
-            border-bottom: none;
-            border-radius: 6px 6px 0 0;
+            display: flex; gap: 2px; flex-wrap: wrap; align-items: center;
+            padding: 5px 7px; background: var(--color-surface-alt);
+            border: 1px solid var(--color-border); border-bottom: none;
+            border-radius: var(--radius-sm) var(--radius-sm) 0 0;
         }
-        .toolbar-sep { width: 1px; height: 20px; background: #d0d0d0; margin: 0 4px; flex-shrink: 0; }
+        .toolbar-sep { width: 1px; height: 20px; background: var(--color-border); margin: 0 4px; flex-shrink: 0; }
         .btn-tool {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            padding: 3px 7px;
-            min-width: 30px;
-            height: 26px;
-            font-size: 11.5px;
-            font-weight: 700;
-            font-family: inherit;
-            cursor: pointer;
-            border: 1px solid transparent;
-            background: transparent;
-            color: #333;
-            border-radius: 4px;
-            transition: background 0.12s, border-color 0.12s;
-            white-space: nowrap;
-            line-height: 1;
+            display: inline-flex; align-items: center; justify-content: center;
+            padding: 3px 7px; min-width: 30px; height: 26px;
+            font-size: 11.5px; font-weight: 700; font-family: inherit;
+            cursor: pointer; border: 1px solid transparent;
+            background: transparent; color: var(--color-text);
+            border-radius: 4px; transition: background 0.1s; white-space: nowrap;
         }
-        .btn-tool:hover  { background: #e4e4e4; border-color: #bbb; }
-        .btn-tool:active { background: #d0d0d0; }
+        .btn-tool:hover  { background: var(--color-border); }
         .btn-tool.t-italic { font-style: italic; }
         .btn-tool.t-strike { text-decoration: line-through; }
 
-        /* --- WORKSPACE --- */
-        .workspace { width: 100%; height: 56vh; border: 1px solid #ddd; border-radius: 0 0 6px 6px; background: #fdfdfd; overflow-y: auto; box-sizing: border-box; }
-        textarea { width: 100%; height: 100%; padding: 1rem; font-family: 'Courier New', monospace; font-size: 14px; line-height: 1.6; border: none; resize: none; box-sizing: border-box; outline: none; background: transparent; }
+        /* ── Workspace pane ─────────────────────────────────────────────────── */
+        .workspace {
+            width: 100%; height: 54vh;
+            border: 1px solid var(--color-border);
+            border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+            background: var(--color-surface); overflow-y: auto;
+        }
+        textarea {
+            width: 100%; height: 100%; padding: 1rem;
+            font-family: 'Courier New', monospace; font-size: 14px; line-height: 1.6;
+            border: none; resize: none; outline: none;
+            background: transparent; color: var(--color-text);
+        }
 
-        /* --- PREVIEW --- */
+        /* ── Preview ─────────────────────────────────────────────────────────── */
         #visual-preview {
             padding: 2rem; height: 100%; box-sizing: border-box; overflow-y: auto;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-            line-height: 1.6; color: #24292e; background: #fff;
+            line-height: 1.6; color: var(--color-text);
         }
-        #visual-preview h1, #visual-preview h2 { border-bottom: 1px solid #eaecef; padding-bottom: 0.3em; margin-top: 1.5em; font-weight: 600; }
+        #visual-preview h1, #visual-preview h2 { border-bottom: 1px solid var(--color-border); padding-bottom: 0.3em; margin-top: 1.5em; }
         #visual-preview h1 { font-size: 2em; }
         #visual-preview h2 { font-size: 1.5em; }
-        #visual-preview h3 { font-size: 1.25em; margin-top: 1.5em; }
-        #visual-preview h4 { font-size: 1.1em;  margin-top: 1.2em; }
-        #visual-preview h5 { font-size: 1em;    margin-top: 1.2em; font-weight: 600; }
-        #visual-preview h6 { font-size: 0.9em;  margin-top: 1.2em; font-weight: 600; color: #555; }
-        #visual-preview p  { margin-top: 0; margin-bottom: 16px; }
         #visual-preview table { border-collapse: collapse; width: 100%; margin-bottom: 16px; }
-        #visual-preview table th, #visual-preview table td { padding: 8px 13px; border: 1px solid #dfe2e5; }
-        #visual-preview table th { background-color: #f6f8fa; font-weight: 600; text-align: left; }
-        #visual-preview table tr:nth-child(2n) { background-color: #f6f8fa; }
-        #visual-preview code { padding: 0.2em 0.4em; font-size: 85%; background-color: rgba(27,31,35,0.05); border-radius: 3px; font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; }
-        #visual-preview pre { padding: 16px; overflow: auto; font-size: 85%; line-height: 1.45; background-color: #f6f8fa; border-radius: 6px; margin-bottom: 16px; }
-        #visual-preview pre code { background-color: transparent; padding: 0; }
-        #visual-preview blockquote { padding: 0 1em; color: #6a737d; border-left: 0.25em solid #dfe2e5; margin: 0 0 16px 0; }
-        #visual-preview img { max-width: 100%; height: auto; border-radius: 6px; margin: 8px 0; display: block; }
-        #visual-preview .callout-important { border-left: 4px solid #e3a008; background: #fffbeb; padding: 0.75rem 1rem; margin-bottom: 16px; border-radius: 0 6px 6px 0; color: #92400e; }
-        #visual-preview .callout-note      { border-left: 4px solid #3b82f6; background: #eff6ff; padding: 0.75rem 1rem; margin-bottom: 16px; border-radius: 0 6px 6px 0; color: #1e40af; }
+        #visual-preview table th, #visual-preview table td { padding: 8px 13px; border: 1px solid var(--color-border); }
+        #visual-preview table th { background: var(--color-surface-alt); font-weight: 600; }
+        #visual-preview code { padding: 0.2em 0.4em; font-size: 85%; background: var(--color-surface-alt); border-radius: 3px; font-family: monospace; }
+        #visual-preview pre { padding: 16px; overflow: auto; font-size: 85%; background: var(--color-surface-alt); border-radius: var(--radius-sm); margin-bottom: 16px; }
+        #visual-preview pre code { background: transparent; padding: 0; }
+        #visual-preview blockquote { padding: 0 1em; color: var(--color-text-muted); border-left: 0.25em solid var(--color-border); margin: 0 0 16px 0; }
+        #visual-preview img { max-width: 100%; height: auto; border-radius: var(--radius-sm); margin: 8px 0; display: block; }
+        #visual-preview .callout-important { border-left: 4px solid #d97706; background: var(--color-warn-bg); padding: 0.75rem 1rem; margin-bottom: 16px; border-radius: 0 var(--radius-sm) var(--radius-sm) 0; color: var(--color-warn-text); }
+        #visual-preview .callout-note      { border-left: 4px solid #3b82f6; background: #eff6ff; padding: 0.75rem 1rem; margin-bottom: 16px; border-radius: 0 var(--radius-sm) var(--radius-sm) 0; color: #1e40af; }
 
-        /* --- SAVE MODAL --- */
-        .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 1000; }
-        .modal-box { background: white; border-radius: 10px; padding: 1.8rem 2rem; max-width: 480px; width: 90%; box-shadow: 0 8px 32px rgba(0,0,0,0.18); }
-        .modal-box h3 { margin: 0 0 0.75rem; font-size: 1.1rem; }
-        .modal-box p  { margin: 0 0 0.5rem; font-size: 0.9rem; color: #444; line-height: 1.5; }
-        .modal-path   { font-size: 0.82rem; color: #0066cc; cursor: pointer; word-break: break-all; text-decoration: underline; font-family: monospace; }
-        .modal-path:hover { color: #0044aa; }
+        /* ── Save modal ─────────────────────────────────────────────────────── */
+        .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.45); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+        .modal-box { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-md); padding: 1.8rem 2rem; max-width: 480px; width: 90%; box-shadow: 0 8px 32px rgba(0,0,0,0.2); }
+        .modal-box h3 { margin: 0 0 0.75rem; font-size: 1.05rem; }
+        .modal-box p  { margin: 0 0 0.5rem; font-size: 0.88rem; color: var(--color-text-muted); line-height: 1.5; }
+        .modal-path   { font-size: 0.82rem; color: var(--color-primary); cursor: pointer; word-break: break-all; text-decoration: underline; font-family: monospace; }
         .modal-actions { display: flex; gap: 0.6rem; justify-content: flex-end; margin-top: 1.2rem; }
-        .modal-actions button { padding: 0.45rem 1rem; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 0.85rem; border: none; }
-        .btn-modal-cancel  { background: #eee; color: #333; }
-        .btn-modal-cancel:hover { background: #ddd; }
-        .btn-modal-confirm { background: #d9534f; color: white; }
-        .btn-modal-confirm:hover { background: #b52b27; }
+        .modal-actions button { padding: 0.42rem 1rem; border-radius: var(--radius-sm); font-weight: 600; cursor: pointer; font-size: 0.85rem; border: none; }
+        .btn-modal-cancel  { background: var(--color-border); color: var(--color-text); }
+        .btn-modal-confirm { background: var(--color-danger); color: #fff; }
 
-        /* Unsaved changes dot on Save button */
-        .dirty-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #e8a020; margin-left: 5px; vertical-align: middle; }
+        .dirty-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #f59e0b; margin-left: 5px; vertical-align: middle; }
 
-        /* --- WARM-UP BANNER --- */
-        .warmup-bar {
-            display: flex; align-items: center; gap: 0.55rem;
-            background: #fffbeb; border: 1px solid #fde68a;
-            color: #92400e; border-radius: 8px;
-            padding: 0.5rem 0.9rem; font-size: 0.85rem;
-            margin-bottom: 0.75rem; animation: pulse-bg 2s ease-in-out infinite;
+        /* ── Cloud panel ─────────────────────────────────────────────────────── */
+        .cloud-panel { display: flex; flex-direction: column; gap: 1rem; }
+
+        /* Auth strip */
+        .auth-strip {
+            display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;
+            padding: 0.75rem 1rem; border-radius: var(--radius-sm);
+            border: 1px solid var(--color-border); background: var(--color-surface-alt);
         }
-        @keyframes pulse-bg {
-            0%, 100% { background: #fffbeb; }
-            50%       { background: #fef3c7; }
+        .auth-indicator { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+        .auth-indicator.signed-in  { background: var(--color-success); }
+        .auth-indicator.signed-out { background: var(--color-danger); }
+        .auth-indicator.checking   { background: #f59e0b; animation: pulse 1s ease infinite; }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+        .auth-label { font-size: 0.88rem; color: var(--color-text); flex: 1; }
+        .auth-account { font-size: 0.82rem; color: var(--color-text-muted); font-family: monospace; }
+        .auth-btn { padding: 0.38rem 0.8rem; border-radius: var(--radius-sm); font-size: 0.82rem; font-weight: 600; cursor: pointer; border: 1px solid var(--color-border); background: var(--color-surface); color: var(--color-text); }
+        .auth-btn:hover { border-color: var(--color-primary); color: var(--color-primary); }
+        .auth-btn.danger:hover { border-color: var(--color-danger); color: var(--color-danger); }
+
+        /* Device-code box */
+        .device-code-box {
+            padding: 1rem; border-radius: var(--radius-sm);
+            border: 1px solid var(--color-warn-border); background: var(--color-warn-bg);
+            color: var(--color-warn-text); font-size: 0.9rem;
         }
-        .warmup-bar .spin {
-            display: inline-block; width: 14px; height: 14px;
-            border: 2px solid #f59e0b; border-top-color: transparent;
-            border-radius: 50%; animation: spin 0.8s linear infinite; flex-shrink: 0;
+        .device-code-box .code { font-size: 1.5rem; font-weight: 800; font-family: monospace; letter-spacing: 0.1em; }
+        .device-code-box a { color: var(--color-primary); }
+
+        /* Field rows */
+        .field-row { display: flex; flex-direction: column; gap: 0.3rem; }
+        .field-row label { font-size: 0.82rem; font-weight: 600; color: var(--color-text-muted); }
+        .field-row input[type=text], .field-row input[type=url] {
+            padding: 0.5rem 0.75rem; border-radius: var(--radius-sm);
+            border: 1px solid var(--color-border); font-size: 0.9rem; width: 100%;
+            background: var(--color-surface); color: var(--color-text);
         }
-        @keyframes spin { to { transform: rotate(360deg); } }
+        .field-row input:focus { outline: 2px solid var(--color-primary); border-color: transparent; }
+
+        /* Toggle row */
+        .toggle-row { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+        .toggle-row label { font-size: 0.88rem; color: var(--color-text-muted); cursor: pointer; }
+        .sub-field { padding-left: 1.5rem; }
+
+        /* Progress bar */
+        .progress-wrap { display: flex; flex-direction: column; gap: 0.5rem; }
+        .progress-bar-bg { background: var(--color-border); border-radius: 99px; height: 8px; overflow: hidden; }
+        .progress-bar-fill { background: var(--color-primary); height: 100%; width: 0%; border-radius: 99px; transition: width 0.3s ease; }
+        .progress-log { max-height: 160px; overflow-y: auto; font-size: 0.8rem; font-family: monospace; color: var(--color-text-muted); background: var(--color-surface-alt); border: 1px solid var(--color-border); border-radius: var(--radius-sm); padding: 0.5rem 0.75rem; }
+        .progress-log .ok   { color: var(--color-success); }
+        .progress-log .fail { color: var(--color-danger); }
+
+        /* Cloud action buttons row */
+        .cloud-actions { display: flex; gap: 0.6rem; flex-wrap: wrap; }
+        .cloud-actions button {
+            padding: 0.5rem 1.1rem; border-radius: var(--radius-sm); font-weight: 600;
+            font-size: 0.88rem; cursor: pointer; border: none;
+        }
+        #btn-cloud-convert { background: var(--color-primary); color: #fff; }
+        #btn-cloud-convert:hover { background: var(--color-primary-h); }
+        #btn-cloud-batch   { background: var(--color-primary); color: #fff; }
+        #btn-cloud-batch:hover { background: var(--color-primary-h); }
+        #btn-cloud-convert:disabled, #btn-cloud-batch:disabled { opacity: 0.5; cursor: default; }
     </style>
 </head>
 <body>
 
 <div class="card">
-    <div class="top-shutdown">
-        <button class="top-shutdown-link" onclick="stopService()">Stop Python App</button>
+    <div class="top-bar">
+        <span></span>
+        <button class="top-shutdown" onclick="stopService()">Stop Python App</button>
     </div>
 
     <div class="hero-banner">
         <div class="hero-copy">
-            <h1>PM Spec Converter (1.0)</h1>
-            <p class="hero-subtitle">Converting your docs into Markdown format</p>
+            <h1>Word to MD — Easy Converter</h1>
+            <p class="hero-subtitle">Convert Word documents to Markdown — local or from SharePoint</p>
         </div>
-       <div class="hero-logo" aria-label="App logo" title="App logo">
-    <img src="data:image/png;base64,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"
-        alt="App logo"
-        style="width: 100%; height: auto; display: block;"
-    />
-</div>
+        <div class="hero-logo" aria-label="App logo">
+            <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAQAAAAEACAYAAABccqhmAAAABmJLR0QA/wD/AP+gvaeTAAAgAElEQVR4nO2deZAk1X3nvy+z7ruqq6v6mj6mj+kZYBghEBKSAGGw15Lt3bUD/aGQI7wObRgElmBAB14rNFpkIQMzgxYEaHcj1ofscBjLsbIIXSCwJFsn4lzQzDQ9www9PX0f1Xd3Vb79o47Oyso6urte5VG/T0R1V2W+zPxVZf5+773f7/feAwiCIAiCIAiCIAiCIAiCIAiCIAiCIAiCIAiCIAiCIAiCIAiCIAiCIAiCIAiCIAiCIAiCIAiCIAiCIAiCIAiCIAiCIAiCIAiCIAiCIAiCIAiCIAiC2AvMaAGIBvM/RrqkDP8I59L1jPMeMMgc7CIDfqaA/wOODr5utIhE4yAD0Cx8eTQsOTP3g7HbADjLlOIAnlKgHMXRAxcbKB1hEGQAmgD5xMjvcuBxAF01HrICjvuVpbHjOPaBtEjZCGMhA2BnHhzpZw48xoD/sMszvKJw3IZ7Bn9WV7kI00AGwI587QWntBw+CoZjADx7PBsH8HXFlb4bdx6c3btwhJkgA2A3TozcIAFPADhY5zNPMs4+nTna/7dgjNf53IRBkAGwC4+cTUpK5iEAH4XA+8qAH2YYvx13D/1a1DWIxkEGwOpwzuQTo3/IGT8BoKVBV90Cwwll0XEMx/rWG3RNQgBkAKzM8dNXykx6ggPvMeT6DKMSwx3puwa/Z8j1iT1DBsCKfG3cJy2vfBoMf4byMf2GwYGnuQO34xODY0bLQuwMMgAWIxfTfwxAt9GyaFgE+OeVrsHH8GGWMVoYojbIAFiFE6c7GaSvMOAPjBalCi8pUG7D0QO/MFoQojpkAMzOsecdUqjzDoB9EUDAaHFqRAH4/1Yc7FP4xGDKaGGI8pABMDMPj75PYsoTYLjcaFF2B7vEOD6buWfgb4yWhNCHDIAZeeB8VHJvHQP4nQAko8XZKxx4jkuZj+Ou4dNGy0IUQwbATHDO5JMjf8TBHgQQN1qcOrMG4ItKavNhHLts02hhiCxkAMzC8dEhxjKPM7DfMFoUwYxICr8jfe/QM0YLQpABMJ4Tb3slvv4ZMHwWgNtocRoGw1NKmt2JTw1MGS1KM0MGwEDkk2c+xLn0GMB7jZbFIBYAfkxJDT6KY0wxWphmhAyAEfzlqQ7JKX8ZwB8aLYoZYAy/ynDpNhztf8FoWZoNMgCNZDum/98BhIwWx2SkAfa4spX+c3xmeMloYZoFMgCN4uTIVbLCn+SMXWO0KKaGYZwp7D7KHWgMZABEc/JcROKZLwD8DgCy0eJYBQ48zVn6T3H3wbeMlsXOkAEQiHx85FbO8CiApNGyWJRVcDykLG1+iXIHxEAGQAQn3hxg4F9lwG8aLYpNeE3h7DbcM/ATowWxG2QA6obJIW2vo/QAAANXSUVORK5CYII="
+                 alt="App logo" style="width:100%;height:auto;display:block;" />
+        </div>
     </div>
 
-    <div id="step-upload">
-        <div class="upload-area" id="drop-zone" onclick="document.getElementById('file-input').click()">
-            <h3 style="margin-top:0;">📁 Drag & Drop a .docx or .md file</h3>
-            <p>Convert Word to Markdown using local AI, or instantly preview existing Markdown files.</p>
-            <input type="file" id="file-input" accept=".docx,.DOCX,.md,.MD,.txt" class="hidden" />
-            <input type="file" id="batch-file-input" accept=".docx,.DOCX" multiple class="hidden" />
-            <input type="file" id="folder-input" accept=".docx,.DOCX" webkitdirectory directory multiple class="hidden" />
-            <div class="upload-actions">
-                <button type="button" onclick="event.stopPropagation(); document.getElementById('batch-file-input').click();">Batch Convert Selected Files</button>
-                <button type="button" onclick="event.stopPropagation(); document.getElementById('folder-input').click();">Batch Convert Folder</button>
+    <!-- Mode selector -->
+    <div class="mode-tabs">
+        <button class="mode-tab active" id="tab-local"  onclick="switchMode('local')">Local Conversion</button>
+        <button class="mode-tab"        id="tab-cloud"  onclick="switchMode('cloud')">Cloud (SharePoint / OneDrive)</button>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════════════════════════ -->
+    <!-- LOCAL PANEL                                                           -->
+    <!-- ══════════════════════════════════════════════════════════════════════ -->
+    <div id="local-panel">
+
+        <div id="warmup-bar" class="warmup-bar hidden">
+            <span class="spin"></span>
+            <span>Document engine is warming up — you can upload as soon as it finishes (usually under 30 s).</span>
+        </div>
+
+        <div id="step-upload">
+            <div class="upload-area" id="drop-zone" onclick="document.getElementById('file-input').click()">
+                <h3>Drag &amp; Drop a .docx or .md file</h3>
+                <p>Convert Word to Markdown using local AI, or instantly preview existing Markdown files.</p>
+                <input type="file" id="file-input"       accept=".docx,.DOCX,.md,.MD,.txt" class="hidden" />
+                <input type="file" id="batch-file-input" accept=".docx,.DOCX" multiple      class="hidden" />
+                <input type="file" id="folder-input"     accept=".docx,.DOCX" webkitdirectory directory multiple class="hidden" />
+                <div class="upload-actions">
+                    <button type="button" onclick="event.stopPropagation(); document.getElementById('batch-file-input').click();">Batch Convert Selected Files</button>
+                    <button type="button" onclick="event.stopPropagation(); document.getElementById('folder-input').click();">Batch Convert Folder</button>
+                </div>
             </div>
             <div id="batch-status" class="batch-status hidden"></div>
         </div>
-    </div>
 
-    <div id="warmup-bar" class="warmup-bar hidden">
-        <span class="spin"></span>
-        <span>Document engine is warming up — you can upload as soon as it finishes (usually under 30 s).</span>
-    </div>
+        <div id="step-loading" class="loader hidden">
+            <div class="spin" style="width:32px;height:32px;border-width:3px;margin:0 auto 1rem;"></div>
+            <h3 id="loading-title" style="margin:0;">AI is processing your document…</h3>
+            <p id="loading-subtitle" style="color:var(--color-text-muted);">Extracting text, tables, and formatting.</p>
+        </div>
 
-    <div id="step-loading" class="loader hidden">
-        <h3 id="loading-title">⏳ AI is processing your document...</h3>
-        <p id="loading-subtitle">Extracting text, tables, and formatting.</p>
-    </div>
-
-    <div id="step-workspace" class="hidden">
-
-        <div class="editor-header">
-            <div class="tabs">
-                <button id="btn-tab-edit"    class="tab-btn active">📝 Edit Markdown</button>
-                <button id="btn-tab-preview" class="tab-btn">👁️ Visual Preview</button>
+        <div id="step-workspace" class="hidden">
+            <div class="editor-header">
+                <div class="tabs">
+                    <button id="btn-tab-edit"    class="tab-btn active">Edit Markdown</button>
+                    <button id="btn-tab-preview" class="tab-btn">Visual Preview</button>
+                </div>
+                <div class="action-btns">
+                    <button class="btn-danger"     onclick="resetApp()">Close</button>
+                    <button id="btn-copy"          class="btn-secondary">Copy</button>
+                    <button id="btn-open-folder"   class="btn-secondary hidden">Open Folder</button>
+                    <button id="btn-save"          class="btn-primary">Save</button>
+                </div>
             </div>
-            <div class="action-btns">
-                <button class="danger"           onclick="resetApp()">✕ Close</button>
-                <button id="btn-copy"            class="secondary">📋 Copy</button>
-                <button id="btn-open-folder"     class="secondary hidden">📂 Open Folder</button>
-                <button id="btn-save"            class="primary">💾 Save</button>
+
+            <div class="toolbar" id="md-toolbar">
+                <button class="btn-tool" title="Normal paragraph" onclick="fmt('p')">P</button>
+                <div class="toolbar-sep"></div>
+                <button class="btn-tool" title="Heading 1" onclick="fmt('h1')">H1</button>
+                <button class="btn-tool" title="Heading 2" onclick="fmt('h2')">H2</button>
+                <button class="btn-tool" title="Heading 3" onclick="fmt('h3')">H3</button>
+                <button class="btn-tool" title="Heading 4" onclick="fmt('h4')">H4</button>
+                <button class="btn-tool" title="Heading 5" onclick="fmt('h5')">H5</button>
+                <button class="btn-tool" title="Heading 6" onclick="fmt('h6')">H6</button>
+                <div class="toolbar-sep"></div>
+                <button class="btn-tool"          title="Bold"          onclick="fmt('bold')"><b>B</b></button>
+                <button class="btn-tool t-italic" title="Italic"        onclick="fmt('italic')">I</button>
+                <button class="btn-tool t-strike" title="Strikethrough" onclick="fmt('strike')">S</button>
+                <button class="btn-tool"          title="Inline code"   onclick="fmt('code-inline')" style="font-family:monospace;">`c`</button>
+                <div class="toolbar-sep"></div>
+                <button class="btn-tool" title="Bullet list"  onclick="fmt('ul')">• List</button>
+                <button class="btn-tool" title="Blockquote"   onclick="fmt('quote')">" Quote</button>
+                <button class="btn-tool" title="Code block"   onclick="fmt('code-block')" style="font-family:monospace;">{ }</button>
+                <button class="btn-tool" title="Insert table" onclick="fmt('table')">Table</button>
+                <div class="toolbar-sep"></div>
+                <button class="btn-tool" title="Insert link"  onclick="fmt('link')">Link</button>
+                <button class="btn-tool" title="Insert image" onclick="fmt('image')">Image</button>
+                <div class="toolbar-sep"></div>
+                <button class="btn-tool" title="Important callout" onclick="fmt('important')" style="color:#b45309;">Important</button>
+                <button class="btn-tool" title="Note callout"      onclick="fmt('note')"      style="color:#1d4ed8;">Note</button>
+            </div>
+
+            <div class="workspace">
+                <textarea id="markdown-editor" spellcheck="false"></textarea>
+                <div id="visual-preview" class="hidden"></div>
+            </div>
+        </div><!-- /step-workspace -->
+    </div><!-- /local-panel -->
+
+    <!-- ══════════════════════════════════════════════════════════════════════ -->
+    <!-- CLOUD PANEL                                                           -->
+    <!-- ══════════════════════════════════════════════════════════════════════ -->
+    <div id="cloud-panel" class="hidden cloud-panel">
+
+        <!-- Auth strip -->
+        <div class="auth-strip">
+            <span class="auth-indicator checking" id="auth-indicator"></span>
+            <span class="auth-label" id="auth-label">Checking authentication…</span>
+            <span class="auth-account" id="auth-account"></span>
+            <button class="auth-btn" id="btn-sign-in"  onclick="startSignIn()"  style="display:none;">Sign in</button>
+            <button class="auth-btn danger" id="btn-sign-out" onclick="signOut()  " style="display:none;">Sign out</button>
+        </div>
+
+        <!-- Device code -->
+        <div class="device-code-box hidden" id="device-code-box">
+            <p style="margin:0 0 0.4rem;font-weight:600;">Open <a id="verify-uri" href="#" target="_blank" rel="noopener">this link</a> and enter the code:</p>
+            <div class="code" id="device-code-value"></div>
+            <p style="margin:0.5rem 0 0;font-size:0.8rem;color:var(--color-text-muted);">Waiting for you to sign in…</p>
+        </div>
+
+        <!-- Source URL -->
+        <div class="field-row">
+            <label for="cloud-source-url">Source SharePoint / OneDrive URL</label>
+            <input type="url" id="cloud-source-url" placeholder="https://tenant.sharepoint.com/sites/MySite/Shared Documents/…" />
+        </div>
+
+        <!-- Destination toggles -->
+        <div>
+            <div class="toggle-row">
+                <input type="checkbox" id="dest-sp-toggle" onchange="toggleDestSP(this.checked)" />
+                <label for="dest-sp-toggle">Save Markdown back to SharePoint / OneDrive</label>
+            </div>
+            <div class="sub-field field-row hidden" id="dest-sp-field">
+                <label for="cloud-dest-sp-url">Destination folder URL</label>
+                <input type="url" id="cloud-dest-sp-url" placeholder="https://tenant.sharepoint.com/sites/MySite/Shared Documents/Markdown" />
             </div>
         </div>
 
-        <div class="toolbar" id="md-toolbar">
-
-            <button class="btn-tool" title="Normal paragraph — strips heading markers" onclick="fmt('p')">¶ P</button>
-
-            <div class="toolbar-sep"></div>
-
-            <button class="btn-tool" title="Heading 1" onclick="fmt('h1')" style="font-size:13px;">H1</button>
-            <button class="btn-tool" title="Heading 2" onclick="fmt('h2')" style="font-size:12px;">H2</button>
-            <button class="btn-tool" title="Heading 3" onclick="fmt('h3')" style="font-size:11.5px;">H3</button>
-            <button class="btn-tool" title="Heading 4" onclick="fmt('h4')" style="font-size:11px;">H4</button>
-            <button class="btn-tool" title="Heading 5" onclick="fmt('h5')" style="font-size:10.5px;">H5</button>
-            <button class="btn-tool" title="Heading 6" onclick="fmt('h6')" style="font-size:10px; color:#777;">H6</button>
-
-            <div class="toolbar-sep"></div>
-
-            <button class="btn-tool"           title="Bold"          onclick="fmt('bold')"><b>B</b></button>
-            <button class="btn-tool t-italic"  title="Italic"        onclick="fmt('italic')">I</button>
-            <button class="btn-tool t-strike"  title="Strikethrough" onclick="fmt('strike')">S</button>
-            <button class="btn-tool"            title="Inline code"   onclick="fmt('code-inline')" style="font-family:monospace;">`c`</button>
-
-            <div class="toolbar-sep"></div>
-
-            <button class="btn-tool" title="Bullet list"  onclick="fmt('ul')">• List</button>
-            <button class="btn-tool" title="Blockquote"   onclick="fmt('quote')">" Quote</button>
-            <button class="btn-tool" title="Code block"   onclick="fmt('code-block')" style="font-family:monospace;">{ }</button>
-            <button class="btn-tool" title="Insert table" onclick="fmt('table')">⊞ Table</button>
-
-            <div class="toolbar-sep"></div>
-
-            <button class="btn-tool" title="Insert link"  onclick="fmt('link')">🔗 Link</button>
-            <button class="btn-tool" title="Insert image" onclick="fmt('image')">🖼 Image</button>
-
-            <div class="toolbar-sep"></div>
-
-            <button class="btn-tool" title="Important callout" onclick="fmt('important')" style="color:#b45309;">⚠ Important</button>
-            <button class="btn-tool" title="Note callout"      onclick="fmt('note')"      style="color:#1d4ed8;">📝 Note</button>
+        <div>
+            <div class="toggle-row">
+                <input type="checkbox" id="dest-local-toggle" onchange="toggleDestLocal(this.checked)" />
+                <label for="dest-local-toggle">Save Markdown locally</label>
+            </div>
+            <div class="sub-field field-row hidden" id="dest-local-field">
+                <label for="cloud-dest-local-dir">Local output folder path</label>
+                <input type="text" id="cloud-dest-local-dir" placeholder="C:\Users\you\Documents\Markdown" />
+            </div>
         </div>
 
-        <div class="workspace">
-            <textarea id="markdown-editor" spellcheck="false"></textarea>
-            <div id="visual-preview" class="hidden"></div>
+        <!-- Actions -->
+        <div class="cloud-actions">
+            <button id="btn-cloud-convert" onclick="cloudConvertSingle()" disabled>Convert Single File</button>
+            <button id="btn-cloud-batch"   onclick="cloudBatch()"         disabled>Batch Convert Folder</button>
         </div>
-    </div>
-</div>
 
+        <!-- Progress -->
+        <div class="progress-wrap hidden" id="cloud-progress">
+            <div style="display:flex;justify-content:space-between;font-size:0.82rem;color:var(--color-text-muted);">
+                <span id="progress-label">Starting…</span>
+                <span id="progress-pct">0%</span>
+            </div>
+            <div class="progress-bar-bg"><div class="progress-bar-fill" id="progress-fill"></div></div>
+            <div class="progress-log" id="progress-log"></div>
+        </div>
+
+    </div><!-- /cloud-panel -->
+</div><!-- /card -->
+
+<!-- Save modal -->
 <div id="save-modal" class="modal-backdrop hidden">
     <div class="modal-box">
-        <h3 id="modal-title">💾 File already saved on disk</h3>
+        <h3 id="modal-title">File already saved on disk</h3>
         <p id="modal-desc">This document was saved automatically during conversion. The current location is:</p>
         <p><span class="modal-path" id="modal-path" onclick="openFolder()"></span></p>
         <p id="modal-warn" style="margin-top:0.8rem;">Proceeding will <strong>overwrite</strong> the original file with your current edits. Continue?</p>
@@ -290,196 +504,198 @@
 </div>
 
 <script>
-    // ── Refs ──────────────────────────────────────────────────────────────────
-    const fileInput      = document.getElementById('file-input');
-    const batchFileInput = document.getElementById('batch-file-input');
-    const folderInput    = document.getElementById('folder-input');
-    const dropZone       = document.getElementById('drop-zone');
-    const batchStatus    = document.getElementById('batch-status');
-    const stepUpload     = document.getElementById('step-upload');
-    const stepLoading    = document.getElementById('step-loading');
-    const stepWorkspace  = document.getElementById('step-workspace');
-    const loadingTitle   = document.getElementById('loading-title');
-    const loadingSubtitle = document.getElementById('loading-subtitle');
-    const markdownEditor = document.getElementById('markdown-editor');
-    const visualPreview  = document.getElementById('visual-preview');
-    const btnTabEdit     = document.getElementById('btn-tab-edit');
-    const btnTabPreview  = document.getElementById('btn-tab-preview');
-    const btnSave        = document.getElementById('btn-save');
-    const btnCopy        = document.getElementById('btn-copy');
-    const btnOpenFolder  = document.getElementById('btn-open-folder');
-    const mdToolbar      = document.getElementById('md-toolbar');
-    const saveModal      = document.getElementById('save-modal');
-    const modalPath      = document.getElementById('modal-path');
-    const modalTitle     = document.getElementById('modal-title');
-    const modalDesc      = document.getElementById('modal-desc');
-    const modalWarn      = document.getElementById('modal-warn');
-    const modalBtnCancel = document.getElementById('modal-btn-cancel');
+// ═══════════════════════════════════════════════════════════════════════════
+// MODE SELECTOR
+// ═══════════════════════════════════════════════════════════════════════════
+function switchMode(mode) {
+    const isCloud = mode === 'cloud';
+    document.getElementById('tab-local').classList.toggle('active', !isCloud);
+    document.getElementById('tab-cloud').classList.toggle('active',  isCloud);
+    document.getElementById('local-panel').classList.toggle('hidden',  isCloud);
+    document.getElementById('cloud-panel').classList.toggle('hidden', !isCloud);
+    if (isCloud && !_authInitialized) initCloudAuth();
+}
 
-    // ── App state ─────────────────────────────────────────────────────────────
-    let currentFileName = null;
-    let serverSavedPath = null;
-    let isServerDoc     = false;
-    let isDirty         = false;
+// ═══════════════════════════════════════════════════════════════════════════
+// LOCAL PANEL — refs & state
+// ═══════════════════════════════════════════════════════════════════════════
+const fileInput       = document.getElementById('file-input');
+const batchFileInput  = document.getElementById('batch-file-input');
+const folderInput     = document.getElementById('folder-input');
+const dropZone        = document.getElementById('drop-zone');
+const batchStatus     = document.getElementById('batch-status');
+const stepUpload      = document.getElementById('step-upload');
+const stepLoading     = document.getElementById('step-loading');
+const stepWorkspace   = document.getElementById('step-workspace');
+const loadingTitle    = document.getElementById('loading-title');
+const loadingSubtitle = document.getElementById('loading-subtitle');
+const markdownEditor  = document.getElementById('markdown-editor');
+const visualPreview   = document.getElementById('visual-preview');
+const btnTabEdit      = document.getElementById('btn-tab-edit');
+const btnTabPreview   = document.getElementById('btn-tab-preview');
+const btnSave         = document.getElementById('btn-save');
+const btnCopy         = document.getElementById('btn-copy');
+const btnOpenFolder   = document.getElementById('btn-open-folder');
+const mdToolbar       = document.getElementById('md-toolbar');
+const saveModal       = document.getElementById('save-modal');
+const modalPath       = document.getElementById('modal-path');
+const modalTitle      = document.getElementById('modal-title');
+const modalDesc       = document.getElementById('modal-desc');
+const modalWarn       = document.getElementById('modal-warn');
+const modalBtnCancel  = document.getElementById('modal-btn-cancel');
 
-    // ── Converter warm-up status ──────────────────────────────────────────────
-    (function pollConverterReady() {
-        const bar = document.getElementById('warmup-bar');
-        if (!bar) return;
-        bar.classList.remove('hidden');
+let currentFileName = null;
+let serverSavedPath = null;
+let isServerDoc     = false;
+let isDirty         = false;
 
-        function check() {
-            fetch('/api/status')
-                .then(r => r.ok ? r.json() : null)
-                .then(data => {
-                    if (data && data.converter_ready) {
-                        bar.classList.add('hidden');
-                    } else {
-                        setTimeout(check, 1500);
-                    }
-                })
-                .catch(() => setTimeout(check, 2000));
-        }
-        check();
-    })();
-
-    function setLoadingState(title, subtitle) {
-        loadingTitle.textContent = title;
-        loadingSubtitle.textContent = subtitle;
-    }
-
-    function showBatchStatus(summaryHtml) {
-        batchStatus.innerHTML = summaryHtml;
-        batchStatus.classList.remove('hidden');
-    }
-
-    // ── Dirty tracking ────────────────────────────────────────────────────────
-    markdownEditor.addEventListener('input', () => {
-        if (!isDirty) {
-            isDirty = true;
-            if (!btnSave.querySelector('.dirty-dot')) {
-                const dot = document.createElement('span');
-                dot.className = 'dirty-dot';
-                dot.title = 'Unsaved changes';
-                btnSave.appendChild(dot);
-            }
-        }
-    });
-
-    function clearDirty() {
-        isDirty = false;
-        const dot = btnSave.querySelector('.dirty-dot');
-        if (dot) dot.remove();
-    }
-
-    // ── Drag & Drop ───────────────────────────────────────────────────────────
-    ['dragenter','dragover','dragleave','drop'].forEach(ev => {
-        dropZone.addEventListener(ev, e => { e.preventDefault(); e.stopPropagation(); });
-        document.body.addEventListener(ev, e => { e.preventDefault(); e.stopPropagation(); });
-    });
-    ['dragenter','dragover'].forEach(ev => dropZone.addEventListener(ev, () => dropZone.classList.add('dragover')));
-    ['dragleave','drop'].forEach(ev     => dropZone.addEventListener(ev, () => dropZone.classList.remove('dragover')));
-
-    // ── File router ───────────────────────────────────────────────────────────
-    function processFile(file) {
-        if (!file) return;
-        const name = file.name.toLowerCase();
-        if (name.endsWith('.docx'))                             startDocxConversion(file);
-        else if (name.endsWith('.md') || name.endsWith('.txt')) openLocalMarkdown(file);
-        else alert("Please drop a valid .docx or .md file!");
-    }
-    function processFiles(fileList, sourceLabel = 'selected files', forceBatch = false) {
-        const files = Array.from(fileList || []);
-        if (!files.length) return;
-
-        if (files.length === 1 && !forceBatch) {
-            processFile(files[0]);
-            return;
-        }
-
-        startBatchConversion(files, sourceLabel);
-    }
-
-    dropZone.addEventListener('drop', e => processFiles(e.dataTransfer.files, 'dropped files'));
-    fileInput.addEventListener('change', e => processFile(e.target.files[0]));
-    batchFileInput.addEventListener('change', e => {
-        processFiles(e.target.files, 'selected files', true);
-        batchFileInput.value = '';
-    });
-    folderInput.addEventListener('change', e => {
-        processFiles(e.target.files, 'folder', true);
-        folderInput.value = '';
-    });
-
-    // ── Path A: DOCX → Server Conversion ─────────────────────────────────────
-    function startDocxConversion(file) {
-        setLoadingState('⏳ AI is processing your document...', 'Extracting text, tables, and formatting.');
-        batchStatus.classList.add('hidden');
-        stepUpload.classList.add('hidden');
-        stepLoading.classList.remove('hidden');
-
-        const formData = new FormData();
-        formData.append("file", file);
-
-        fetch("/api/convert", { method: "POST", body: formData })
-            .then(async r => {
-                if (!r.ok) {
-                    let msg = "Server error. Is the Python server running?";
-                    try {
-                        const payload = await r.json();
-                        if (typeof payload?.detail === 'string') msg = payload.detail;
-                    } catch (_err) {
-                        // Keep default message.
-                    }
-                    throw new Error(msg);
-                }
-                return r.json();
-            })
+// ── Warm-up poll ──────────────────────────────────────────────────────────
+(function pollConverterReady() {
+    const bar = document.getElementById('warmup-bar');
+    if (!bar) return;
+    bar.classList.remove('hidden');
+    function check() {
+        fetch('/api/status')
+            .then(r => r.ok ? r.json() : null)
             .then(data => {
-                if (data.error) throw new Error(data.error);
-
-                markdownEditor.value = data.markdown;
-                currentFileName = data.doc_name;
-                serverSavedPath = data.folder_created
-                    ? data.folder_created + '\\' + data.doc_name + '.md'
-                    : 'Server Outputs folder';
-                isServerDoc = true;
-                clearDirty();
-
-                stepLoading.classList.add('hidden');
-                stepWorkspace.classList.remove('hidden');
-                btnOpenFolder.classList.remove('hidden');
-                btnTabEdit.click();
-                updatePreview();
+                if (data && data.converter_ready) { bar.classList.add('hidden'); }
+                else setTimeout(check, 1500);
             })
-            .catch(err => { alert("Conversion failed: " + err.message); resetApp(); });
+            .catch(() => setTimeout(check, 2000));
     }
+    check();
+})();
 
-    function startBatchConversion(files, sourceLabel = 'selected files') {
-        const docxFiles = files.filter(f => f.name.toLowerCase().endsWith('.docx'));
-        if (!docxFiles.length) {
-            alert('Batch conversion supports .docx files only.');
-            return;
+function setLoadingState(title, subtitle) {
+    loadingTitle.textContent = title;
+    loadingSubtitle.textContent = subtitle;
+}
+
+function showBatchStatus(html) {
+    batchStatus.innerHTML = html;
+    batchStatus.classList.remove('hidden');
+}
+
+// ── Dirty tracking ────────────────────────────────────────────────────────
+markdownEditor.addEventListener('input', () => {
+    if (!isDirty) {
+        isDirty = true;
+        if (!btnSave.querySelector('.dirty-dot')) {
+            const dot = document.createElement('span');
+            dot.className = 'dirty-dot';
+            dot.title = 'Unsaved changes';
+            btnSave.appendChild(dot);
         }
+    }
+});
+function clearDirty() {
+    isDirty = false;
+    const dot = btnSave.querySelector('.dirty-dot');
+    if (dot) dot.remove();
+}
 
-        setLoadingState('⏳ Batch conversion in progress...', `Converting ${docxFiles.length} .docx files from ${sourceLabel}.`);
-        stepUpload.classList.add('hidden');
-        stepLoading.classList.remove('hidden');
+// ── Drag & Drop ───────────────────────────────────────────────────────────
+['dragenter','dragover','dragleave','drop'].forEach(ev => {
+    dropZone.addEventListener(ev, e => { e.preventDefault(); e.stopPropagation(); });
+    document.body.addEventListener(ev, e => { e.preventDefault(); e.stopPropagation(); });
+});
+['dragenter','dragover'].forEach(ev => dropZone.addEventListener(ev, () => dropZone.classList.add('dragover')));
+['dragleave','drop'].forEach(ev =>     dropZone.addEventListener(ev, () => dropZone.classList.remove('dragover')));
 
-        const formData = new FormData();
-        docxFiles.forEach(file => formData.append('files', file));
+function processFile(file) {
+    if (!file) return;
+    const name = file.name.toLowerCase();
+    if (name.endsWith('.docx'))                             startDocxConversion(file);
+    else if (name.endsWith('.md') || name.endsWith('.txt')) openLocalMarkdown(file);
+    else alert('Please drop a valid .docx or .md file!');
+}
+function processFiles(fileList, sourceLabel = 'selected files', forceBatch = false) {
+    const files = Array.from(fileList || []);
+    if (!files.length) return;
+    if (files.length === 1 && !forceBatch) { processFile(files[0]); return; }
+    startBatchConversion(files, sourceLabel);
+}
 
+dropZone.addEventListener('drop', e => processFiles(e.dataTransfer.files, 'dropped files'));
+fileInput.addEventListener('change', e => processFile(e.target.files[0]));
+batchFileInput.addEventListener('change', e => { processFiles(e.target.files, 'selected files', true); batchFileInput.value = ''; });
+folderInput.addEventListener('change',    e => { processFiles(e.target.files, 'folder', true);          folderInput.value    = ''; });
+
+// ── Single docx conversion ────────────────────────────────────────────────
+function startDocxConversion(file) {
+    setLoadingState('AI is processing your document…', 'Extracting text, tables, and formatting.');
+    batchStatus.classList.add('hidden');
+    stepUpload.classList.add('hidden');
+    stepLoading.classList.remove('hidden');
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    fetch('/api/convert', { method: 'POST', body: formData })
+        .then(async r => {
+            if (!r.ok) {
+                let msg = 'Server error. Is the Python server running?';
+                try {
+                    const p = await r.json();
+                    if (typeof p?.detail === 'string') msg = p.detail;
+                } catch (_) {}
+                throw new Error(msg);
+            }
+            return r.json();
+        })
+        .then(data => {
+            if (data.error) throw new Error(data.error);
+            markdownEditor.value = data.markdown;
+            currentFileName = data.doc_name;
+            serverSavedPath = data.folder_created
+                ? data.folder_created + '\\' + data.doc_name + '.md'
+                : 'Server Outputs folder';
+            isServerDoc = true;
+            clearDirty();
+            stepLoading.classList.add('hidden');
+            stepWorkspace.classList.remove('hidden');
+            btnOpenFolder.classList.remove('hidden');
+            btnTabEdit.click();
+            updatePreview();
+        })
+        .catch(err => { alert('Conversion failed: ' + err.message); resetApp(); });
+}
+
+// ── Batch conversion ──────────────────────────────────────────────────────
+function startBatchConversion(files, sourceLabel = 'selected files') {
+    const docxFiles = files.filter(f => f.name.toLowerCase().endsWith('.docx'));
+    if (!docxFiles.length) { alert('Batch conversion supports .docx files only.'); return; }
+
+    setLoadingState('Batch conversion in progress…', `Converting ${docxFiles.length} .docx files from ${sourceLabel}.`);
+    stepUpload.classList.add('hidden');
+    stepLoading.classList.remove('hidden');
+
+    const formData = new FormData();
+    docxFiles.forEach(f => formData.append('files', f));
+
+    // Client-side DLP detection (ZIP magic bytes)
+    const dlpFiles = [];
+    const readers = docxFiles.map(f => new Promise(resolve => {
+        const r = new FileReader();
+        r.onload = e => {
+            const bytes = new Uint8Array(e.target.result);
+            const isPK = bytes[0]===0x50 && bytes[1]===0x4B && bytes[2]===0x03 && bytes[3]===0x04;
+            if (!isPK) dlpFiles.push(f.name);
+            resolve();
+        };
+        r.readAsArrayBuffer(f.slice(0, 4));
+    }));
+
+    Promise.all(readers).then(() => {
         fetch('/api/convert-batch', { method: 'POST', body: formData })
             .then(async r => {
                 if (!r.ok) {
                     let msg = 'Server error during batch conversion.';
                     try {
-                        const payload = await r.json();
-                        if (payload?.detail?.message) msg = payload.detail.message;
-                        else if (typeof payload?.detail === 'string') msg = payload.detail;
-                    } catch (_err) {
-                        // Keep default message.
-                    }
+                        const p = await r.json();
+                        if (p?.detail?.message) msg = p.detail.message;
+                        else if (typeof p?.detail === 'string') msg = p.detail;
+                    } catch (_) {}
                     throw new Error(msg);
                 }
                 return r.json();
@@ -490,258 +706,481 @@
                 stepUpload.classList.remove('hidden');
 
                 const converted = data.converted || [];
-                const failed = data.failed || [];
-                const skipped = data.skipped || [];
+                const failed    = data.failed    || [];
+                const skipped   = data.skipped   || [];
 
-                const detailItems = [];
-                if (converted.length) detailItems.push(`<li><strong>${converted.length}</strong> file(s) converted and saved.</li>`);
-                if (failed.length) detailItems.push(`<li><strong>${failed.length}</strong> file(s) failed conversion.</li>`);
-                if (skipped.length) detailItems.push(`<li><strong>${skipped.length}</strong> file(s) skipped (not .docx).</li>`);
+                const items = [];
+                if (converted.length) items.push(`<li><strong>${converted.length}</strong> file(s) converted and saved.</li>`);
+                if (failed.length)    items.push(`<li><strong>${failed.length}</strong> file(s) failed.</li>`);
+                if (skipped.length)   items.push(`<li><strong>${skipped.length}</strong> file(s) skipped (not .docx).</li>`);
+
+                let dlpHtml = '';
+                if (dlpFiles.length) {
+                    dlpHtml = `<div class="dlp-warn"><strong>DLP-protected files detected</strong> — these files could not be converted locally. Use the <strong>Cloud</strong> mode or open them in Word first.<ul>${dlpFiles.map(n=>`<li>${n}</li>`).join('')}</ul></div>`;
+                }
 
                 showBatchStatus(
-                    `<strong>Batch conversion finished.</strong><br>Output folder: ${data.folder_created}<ul>${detailItems.join('')}</ul>`
+                    `<strong>Batch conversion finished.</strong> Output: ${data.folder_created}<ul>${items.join('')}</ul>${dlpHtml}`
                 );
-
-                if (converted.length > 0) {
-                    openFolder();
-                }
+                if (converted.length) openFolder();
             })
             .catch(err => {
                 stepLoading.classList.add('hidden');
                 stepUpload.classList.remove('hidden');
                 alert('Batch conversion failed: ' + err.message);
             });
-    }
-
-    // ── Path B: Local .md file ────────────────────────────────────────────────
-    function openLocalMarkdown(file) {
-        batchStatus.classList.add('hidden');
-        const reader = new FileReader();
-        reader.onload = e => {
-            markdownEditor.value = e.target.result;
-            currentFileName = file.name.replace(/\.[^/.]+$/, "");
-            serverSavedPath = null;
-            isServerDoc     = false;
-            clearDirty();
-
-            stepUpload.classList.add('hidden');
-            stepWorkspace.classList.remove('hidden');
-            btnOpenFolder.classList.add('hidden');
-            btnTabPreview.click();
-        };
-        reader.onerror = () => alert("Error reading the file.");
-        reader.readAsText(file);
-    }
-
-    // ── Tabs ──────────────────────────────────────────────────────────────────
-    btnTabPreview.addEventListener('click', () => {
-        btnTabEdit.classList.remove('active');
-        btnTabPreview.classList.add('active');
-        markdownEditor.classList.add('hidden');
-        mdToolbar.classList.add('hidden');
-        visualPreview.classList.remove('hidden');
-        updatePreview();
     });
+}
 
-    btnTabEdit.addEventListener('click', () => {
-        btnTabPreview.classList.remove('active');
-        btnTabEdit.classList.add('active');
-        visualPreview.classList.add('hidden');
-        markdownEditor.classList.remove('hidden');
-        mdToolbar.classList.remove('hidden');
-    });
-
-    // ── UPDATED PREVIEW FUNCTION ──────────────────────────────────────────────
-    function updatePreview() {
-        marked.setOptions({ gfm: true, breaks: true });
-        let md = markdownEditor.value;
-        md = md.replace(/\(Images\//g, '(/Outputs/Images/');
-
-        let html = marked.parse(md);
-
-        html = html.replace(/<blockquote>\s*<p>\[!IMPORTANT\]([\s\S]*?)<\/p>\s*<\/blockquote>/gi,
-            (_, b) => `<div class="callout-important"><strong>⚠ Important</strong><br>${b.trim()}</div>`);
-        html = html.replace(/<blockquote>\s*<p>\[!NOTE\]([\s\S]*?)<\/p>\s*<\/blockquote>/gi,
-            (_, b) => `<div class="callout-note"><strong>📝 Note</strong><br>${b.trim()}</div>`);
-
-        visualPreview.innerHTML = html;
-        if (window.Prism) Prism.highlightAllUnder(visualPreview);
-    }
-
-    // ── Toolbar ───────────────────────────────────────────────────────────────
-    function fmt(type) {
-        const ta     = markdownEditor;
-        const start = ta.selectionStart;
-        const end   = ta.selectionEnd;
-        const sel   = ta.value.substring(start, end);
-
-        const stripHeading = t => t.replace(/^#{1,6}\s*/, '').trim();
-        const prefixLines  = prefix => (sel || 'text').split('\n').map(l => prefix + l).join('\n');
-
-        let out = '';
-        let cursorBias = 0;
-
-        switch (type) {
-            case 'p':  out = stripHeading(sel) || 'Paragraph text'; break;
-            case 'h1': out = `# ${stripHeading(sel) || 'Heading 1'}`; break;
-            case 'h2': out = `## ${stripHeading(sel) || 'Heading 2'}`; break;
-            case 'h3': out = `### ${stripHeading(sel) || 'Heading 3'}`; break;
-            case 'h4': out = `#### ${stripHeading(sel) || 'Heading 4'}`; break;
-            case 'h5': out = `##### ${stripHeading(sel) || 'Heading 5'}`; break;
-            case 'h6': out = `###### ${stripHeading(sel) || 'Heading 6'}`; break;
-            case 'bold':         out = `**${sel || 'bold text'}**`;     cursorBias = sel ? 0 : -2; break;
-            case 'italic':       out = `*${sel || 'italic text'}*`;      cursorBias = sel ? 0 : -1; break;
-            case 'strike':       out = `~~${sel || 'strikethrough'}~~`; cursorBias = sel ? 0 : -2; break;
-            case 'code-inline': out = `\`${sel || 'code'}\``;           cursorBias = sel ? 0 : -1; break;
-            case 'ul':          out = prefixLines('- '); break;
-            case 'quote':       out = prefixLines('> '); break;
-            case 'code-block': out = `\n\`\`\`\n${sel || 'code here'}\n\`\`\`\n`; break;
-            case 'table':       out = `\n| Column 1 | Column 2 | Column 3 |\n|---|---|---|\n| Row 1 | Data | Data |\n| Row 2 | Data | Data |\n`; break;
-            case 'link': {
-                const isUrl = sel.startsWith('http');
-                out = `[${isUrl ? 'link text' : (sel || 'link text')}](${isUrl ? sel : 'https://'})`;
-                break;
-            }
-            case 'image': {
-                const imgUrl = sel.startsWith('http') ? sel : (prompt('Image URL:') || 'https://example.com/image.png');
-                out = `![image](${imgUrl})`;
-                break;
-            }
-            case 'important': out = `\n> [!IMPORTANT]\n> ${sel || 'Important note here'}\n`; break;
-            case 'note':      out = `\n> [!NOTE]\n> ${sel || 'Note here'}\n`; break;
-            default: return;
-        }
-
-        ta.focus();
-        ta.setRangeText(out, start, end, 'end');
-        if (!sel && cursorBias !== 0) {
-            const pos = ta.selectionStart + cursorBias;
-            ta.setSelectionRange(pos, pos);
-        }
-        ta.dispatchEvent(new Event('input'));
-        updatePreview();
-    }
-
-    function stopService() {
-        fetch('/api/shutdown', { method: 'POST' })
-            .then(() => {
-                window.location.href = 'about:blank';
-            })
-            .catch(() => {
-                window.location.href = 'about:blank';
-            });
-    }
-
-    // ── Copy ──────────────────────────────────────────────────────────────────
-    btnCopy.addEventListener('click', () => {
-        navigator.clipboard.writeText(markdownEditor.value).then(() => {
-            const orig = btnCopy.innerHTML;
-            btnCopy.innerHTML = "✅ Copied!";
-            setTimeout(() => { btnCopy.innerHTML = orig; }, 2000);
-        });
-    });
-
-    // ── Open Folder ───────────────────────────────────────────────────────────
-    function openFolder() {
-        fetch('/api/open-folder').catch(() => {});
-    }
-    btnOpenFolder.addEventListener('click', () => {
-        openFolder();
-        const orig = btnOpenFolder.innerHTML;
-        btnOpenFolder.innerHTML = "✅ Opened!";
-        setTimeout(() => { btnOpenFolder.innerHTML = orig; }, 2000);
-    });
-
-    // ── Save ──────────────────────────────────────────────────────────────────
-    btnSave.addEventListener('click', () => {
-        if (isServerDoc && serverSavedPath) {
-            modalPath.textContent = serverSavedPath;
-            if (isDirty) {
-                modalTitle.textContent       = '💾 Overwrite saved file?';
-                modalDesc.textContent        = 'This document is already saved on disk at:';
-                modalWarn.style.display      = '';
-                modalBtnCancel.style.display = '';
-                document.getElementById('modal-btn-confirm').textContent = 'Yes, overwrite';
-                document.getElementById('modal-btn-confirm').onclick     = confirmSave;
-            } else {
-                modalTitle.textContent       = '✅ File is already saved';
-                modalDesc.textContent        = 'No changes detected. The file is saved at:';
-                modalWarn.style.display      = 'none';
-                modalBtnCancel.style.display = 'none';
-                document.getElementById('modal-btn-confirm').textContent = 'OK';
-                document.getElementById('modal-btn-confirm').onclick     = closeModal;
-            }
-            saveModal.classList.remove('hidden');
-        } else {
-            doLocalSave();
-        }
-    });
-
-    function closeModal() {
-        saveModal.classList.add('hidden');
-    }
-
-    function confirmSave() {
-        closeModal();
-        fetch('/api/save-changes', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ doc_name: currentFileName, markdown: markdownEditor.value })
-        })
-        .then(r => { if (!r.ok) throw new Error("Server error"); return r.json(); })
-        .then(() => {
-            clearDirty();
-            const orig = btnSave.innerHTML;
-            btnSave.innerHTML = "✅ Saved!";
-            setTimeout(() => { btnSave.innerHTML = '💾 Save'; }, 2000);
-        })
-        .catch(() => alert("Failed to save to server. Is the server running?"));
-    }
-
-    function doLocalSave() {
-        const text = markdownEditor.value;
-        const name = (currentFileName || "document") + ".md";
-        if (window.showSaveFilePicker) {
-            window.showSaveFilePicker({
-                suggestName: name,
-                types: [{ description: 'Markdown File', accept: { 'text/markdown': ['.md'] } }],
-            }).then(async fh => {
-                const w = await fh.createWritable();
-                await w.write(text);
-                await w.close();
-                clearDirty();
-            }).catch(err => { if (err.name !== 'AbortError') alert("Error saving file."); });
-        } else {
-            const blob = new Blob([text], { type: "text/markdown;charset=utf-8" });
-            const a = document.createElement("a");
-            a.href = URL.createObjectURL(blob);
-            a.download = name;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            clearDirty();
-        }
-    }
-
-    // ── Reset ─────────────────────────────────────────────────────────────────
-    function resetApp() {
-        fileInput.value         = '';
-        batchFileInput.value    = '';
-        folderInput.value       = '';
-        markdownEditor.value    = '';
-        visualPreview.innerHTML = '';
-        currentFileName = null;
+// ── Local .md file ────────────────────────────────────────────────────────
+function openLocalMarkdown(file) {
+    batchStatus.classList.add('hidden');
+    const reader = new FileReader();
+    reader.onload = e => {
+        markdownEditor.value = e.target.result;
+        currentFileName = file.name.replace(/\.[^/.]+$/, '');
         serverSavedPath = null;
         isServerDoc     = false;
         clearDirty();
-        batchStatus.classList.add('hidden');
-        setLoadingState('⏳ AI is processing your document...', 'Extracting text, tables, and formatting.');
+        stepUpload.classList.add('hidden');
+        stepWorkspace.classList.remove('hidden');
         btnOpenFolder.classList.add('hidden');
-        btnTabEdit.click();
-        stepWorkspace.classList.add('hidden');
-        stepLoading.classList.add('hidden');
-        stepUpload.classList.remove('hidden');
+        btnTabPreview.click();
+    };
+    reader.onerror = () => alert('Error reading the file.');
+    reader.readAsText(file);
+}
+
+// ── Tabs ──────────────────────────────────────────────────────────────────
+btnTabPreview.addEventListener('click', () => {
+    btnTabEdit.classList.remove('active');
+    btnTabPreview.classList.add('active');
+    markdownEditor.classList.add('hidden');
+    mdToolbar.classList.add('hidden');
+    visualPreview.classList.remove('hidden');
+    updatePreview();
+});
+btnTabEdit.addEventListener('click', () => {
+    btnTabPreview.classList.remove('active');
+    btnTabEdit.classList.add('active');
+    visualPreview.classList.add('hidden');
+    markdownEditor.classList.remove('hidden');
+    mdToolbar.classList.remove('hidden');
+});
+
+function updatePreview() {
+    marked.setOptions({ gfm: true, breaks: true });
+    let md = markdownEditor.value.replace(/\(Images\//g, '(/Outputs/Images/');
+    let html = marked.parse(md);
+    html = html.replace(/<blockquote>\s*<p>\[!IMPORTANT\]([\s\S]*?)<\/p>\s*<\/blockquote>/gi,
+        (_, b) => `<div class="callout-important"><strong>Important</strong><br>${b.trim()}</div>`);
+    html = html.replace(/<blockquote>\s*<p>\[!NOTE\]([\s\S]*?)<\/p>\s*<\/blockquote>/gi,
+        (_, b) => `<div class="callout-note"><strong>Note</strong><br>${b.trim()}</div>`);
+    visualPreview.innerHTML = html;
+    if (window.Prism) Prism.highlightAllUnder(visualPreview);
+}
+
+// ── Toolbar ───────────────────────────────────────────────────────────────
+function fmt(type) {
+    const ta    = markdownEditor;
+    const start = ta.selectionStart;
+    const end   = ta.selectionEnd;
+    const sel   = ta.value.substring(start, end);
+    const stripH = t => t.replace(/^#{1,6}\s*/, '').trim();
+    const prefixLines = prefix => (sel || 'text').split('\n').map(l => prefix + l).join('\n');
+
+    let out = '', cursorBias = 0;
+    switch (type) {
+        case 'p':           out = stripH(sel) || 'Paragraph text'; break;
+        case 'h1':          out = `# ${stripH(sel) || 'Heading 1'}`; break;
+        case 'h2':          out = `## ${stripH(sel) || 'Heading 2'}`; break;
+        case 'h3':          out = `### ${stripH(sel) || 'Heading 3'}`; break;
+        case 'h4':          out = `#### ${stripH(sel) || 'Heading 4'}`; break;
+        case 'h5':          out = `##### ${stripH(sel) || 'Heading 5'}`; break;
+        case 'h6':          out = `###### ${stripH(sel) || 'Heading 6'}`; break;
+        case 'bold':        out = `**${sel || 'bold text'}**`;     cursorBias = sel ? 0 : -2; break;
+        case 'italic':      out = `*${sel || 'italic text'}*`;      cursorBias = sel ? 0 : -1; break;
+        case 'strike':      out = `~~${sel || 'strikethrough'}~~`; cursorBias = sel ? 0 : -2; break;
+        case 'code-inline': out = `\`${sel || 'code'}\``;           cursorBias = sel ? 0 : -1; break;
+        case 'ul':          out = prefixLines('- '); break;
+        case 'quote':       out = prefixLines('> '); break;
+        case 'code-block':  out = `\n\`\`\`\n${sel || 'code here'}\n\`\`\`\n`; break;
+        case 'table':       out = `\n| Column 1 | Column 2 | Column 3 |\n|---|---|---|\n| Row 1 | Data | Data |\n`; break;
+        case 'link': {
+            const isUrl = sel.startsWith('http');
+            out = `[${isUrl ? 'link text' : (sel || 'link text')}](${isUrl ? sel : 'https://'})`;
+            break;
+        }
+        case 'image': {
+            const u = sel.startsWith('http') ? sel : (prompt('Image URL:') || 'https://example.com/image.png');
+            out = `![image](${u})`;
+            break;
+        }
+        case 'important': out = `\n> [!IMPORTANT]\n> ${sel || 'Important note here'}\n`; break;
+        case 'note':      out = `\n> [!NOTE]\n> ${sel || 'Note here'}\n`; break;
+        default: return;
     }
+    ta.focus();
+    ta.setRangeText(out, start, end, 'end');
+    if (!sel && cursorBias !== 0) {
+        const pos = ta.selectionStart + cursorBias;
+        ta.setSelectionRange(pos, pos);
+    }
+    ta.dispatchEvent(new Event('input'));
+    updatePreview();
+}
+
+function stopService() {
+    fetch('/api/shutdown', { method: 'POST' })
+        .finally(() => { window.location.href = 'about:blank'; });
+}
+
+btnCopy.addEventListener('click', () => {
+    navigator.clipboard.writeText(markdownEditor.value).then(() => {
+        const orig = btnCopy.textContent;
+        btnCopy.textContent = 'Copied!';
+        setTimeout(() => { btnCopy.textContent = orig; }, 2000);
+    });
+});
+
+function openFolder() { fetch('/api/open-folder').catch(() => {}); }
+btnOpenFolder.addEventListener('click', () => {
+    openFolder();
+    const orig = btnOpenFolder.textContent;
+    btnOpenFolder.textContent = 'Opened!';
+    setTimeout(() => { btnOpenFolder.textContent = orig; }, 2000);
+});
+
+btnSave.addEventListener('click', () => {
+    if (isServerDoc && serverSavedPath) {
+        modalPath.textContent = serverSavedPath;
+        if (isDirty) {
+            modalTitle.textContent = 'Overwrite saved file?';
+            modalDesc.textContent  = 'This document is already saved on disk at:';
+            modalWarn.style.display = '';
+            modalBtnCancel.style.display = '';
+            document.getElementById('modal-btn-confirm').textContent = 'Yes, overwrite';
+            document.getElementById('modal-btn-confirm').onclick = confirmSave;
+        } else {
+            modalTitle.textContent = 'File is already saved';
+            modalDesc.textContent  = 'No changes detected. The file is saved at:';
+            modalWarn.style.display = 'none';
+            modalBtnCancel.style.display = 'none';
+            document.getElementById('modal-btn-confirm').textContent = 'OK';
+            document.getElementById('modal-btn-confirm').onclick = closeModal;
+        }
+        saveModal.classList.remove('hidden');
+    } else {
+        doLocalSave();
+    }
+});
+
+function closeModal() { saveModal.classList.add('hidden'); }
+
+function confirmSave() {
+    closeModal();
+    fetch('/api/save-changes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ doc_name: currentFileName, markdown: markdownEditor.value }),
+    })
+    .then(r => { if (!r.ok) throw new Error('Server error'); return r.json(); })
+    .then(() => {
+        clearDirty();
+        const orig = btnSave.textContent;
+        btnSave.textContent = 'Saved!';
+        setTimeout(() => { btnSave.textContent = 'Save'; }, 2000);
+    })
+    .catch(() => alert('Failed to save to server.'));
+}
+
+function doLocalSave() {
+    const text = markdownEditor.value;
+    const name = (currentFileName || 'document') + '.md';
+    if (window.showSaveFilePicker) {
+        window.showSaveFilePicker({
+            suggestName: name,
+            types: [{ description: 'Markdown File', accept: { 'text/markdown': ['.md'] } }],
+        }).then(async fh => {
+            const w = await fh.createWritable();
+            await w.write(text);
+            await w.close();
+            clearDirty();
+        }).catch(err => { if (err.name !== 'AbortError') alert('Error saving file.'); });
+    } else {
+        const blob = new Blob([text], { type: 'text/markdown;charset=utf-8' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = name;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        clearDirty();
+    }
+}
+
+function resetApp() {
+    fileInput.value = batchFileInput.value = folderInput.value = '';
+    markdownEditor.value = '';
+    visualPreview.innerHTML = '';
+    currentFileName = serverSavedPath = null;
+    isServerDoc = false;
+    clearDirty();
+    batchStatus.classList.add('hidden');
+    btnOpenFolder.classList.add('hidden');
+    btnTabEdit.click();
+    stepWorkspace.classList.add('hidden');
+    stepLoading.classList.add('hidden');
+    stepUpload.classList.remove('hidden');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CLOUD PANEL
+// ═══════════════════════════════════════════════════════════════════════════
+
+let _authInitialized = false;
+let _cloudAuthed = false;
+
+// ── Auth ──────────────────────────────────────────────────────────────────
+function initCloudAuth() {
+    _authInitialized = true;
+    const ind   = document.getElementById('auth-indicator');
+    const label = document.getElementById('auth-label');
+    const acct  = document.getElementById('auth-account');
+    const btnIn  = document.getElementById('btn-sign-in');
+    const btnOut = document.getElementById('btn-sign-out');
+
+    ind.className = 'auth-indicator checking';
+    label.textContent = 'Checking authentication…';
+
+    fetch('/auth/status')
+        .then(r => r.json())
+        .then(data => {
+            if (data.error && !data.authenticated) {
+                ind.className = 'auth-indicator signed-out';
+                label.textContent = 'Cloud mode unavailable: ' + data.error;
+                return;
+            }
+            if (data.authenticated) {
+                setAuthUI(true, data.account);
+            } else {
+                setAuthUI(false, null);
+            }
+        })
+        .catch(() => {
+            ind.className = 'auth-indicator signed-out';
+            label.textContent = 'Could not reach server.';
+        });
+}
+
+function setAuthUI(authenticated, account) {
+    const ind   = document.getElementById('auth-indicator');
+    const label = document.getElementById('auth-label');
+    const acct  = document.getElementById('auth-account');
+    const btnIn  = document.getElementById('btn-sign-in');
+    const btnOut = document.getElementById('btn-sign-out');
+
+    _cloudAuthed = authenticated;
+    if (authenticated) {
+        ind.className = 'auth-indicator signed-in';
+        label.textContent = 'Signed in';
+        acct.textContent  = account || '';
+        btnIn.style.display  = 'none';
+        btnOut.style.display = '';
+    } else {
+        ind.className = 'auth-indicator signed-out';
+        label.textContent = 'Not signed in';
+        acct.textContent  = '';
+        btnIn.style.display  = '';
+        btnOut.style.display = 'none';
+    }
+
+    document.getElementById('btn-cloud-convert').disabled = !authenticated;
+    document.getElementById('btn-cloud-batch').disabled   = !authenticated;
+}
+
+function startSignIn() {
+    const codeBox = document.getElementById('device-code-box');
+    codeBox.classList.remove('hidden');
+    document.getElementById('device-code-value').textContent = '…';
+    document.getElementById('auth-label').textContent = 'Starting sign-in…';
+
+    fetchSSE('/auth/login', {}, event => {
+        const d = JSON.parse(event.data);
+        if (d.type === 'code') {
+            document.getElementById('device-code-value').textContent = d.user_code;
+            const uri = document.getElementById('verify-uri');
+            uri.href = d.verification_uri;
+            uri.textContent = d.verification_uri;
+            document.getElementById('auth-label').textContent = 'Follow the link and enter the code above';
+        } else if (d.type === 'success') {
+            codeBox.classList.add('hidden');
+            setAuthUI(true, d.account);
+        } else if (d.type === 'error') {
+            codeBox.classList.add('hidden');
+            document.getElementById('auth-label').textContent = 'Sign-in failed: ' + d.message;
+        }
+    });
+}
+
+function signOut() {
+    fetch('/auth/logout', { method: 'POST' })
+        .then(() => setAuthUI(false, null))
+        .catch(() => alert('Sign-out request failed.'));
+}
+
+// ── Destination toggles ───────────────────────────────────────────────────
+function toggleDestSP(on) {
+    document.getElementById('dest-sp-field').classList.toggle('hidden', !on);
+}
+function toggleDestLocal(on) {
+    document.getElementById('dest-local-field').classList.toggle('hidden', !on);
+}
+
+// ── SSE helper for POST requests ──────────────────────────────────────────
+function fetchSSE(url, body, onEvent, onDone) {
+    fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+    }).then(async r => {
+        if (!r.ok) {
+            const txt = await r.text().catch(() => '');
+            throw new Error(`HTTP ${r.status}: ${txt}`);
+        }
+        const reader = r.body.getReader();
+        const dec    = new TextDecoder();
+        let buf = '';
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buf += dec.decode(value, { stream: true });
+            const parts = buf.split('\n\n');
+            buf = parts.pop();
+            for (const part of parts) {
+                for (const line of part.split('\n')) {
+                    if (line.startsWith('data: ')) {
+                        const ev = { data: line.slice(6) };
+                        try { onEvent(ev); } catch (_) {}
+                    }
+                }
+            }
+        }
+        if (onDone) onDone();
+    }).catch(err => {
+        if (onDone) onDone(err);
+        else console.error('SSE error:', err);
+    });
+}
+
+// ── Cloud single convert ──────────────────────────────────────────────────
+function cloudConvertSingle() {
+    const sourceUrl = document.getElementById('cloud-source-url').value.trim();
+    if (!sourceUrl) { alert('Please enter a source SharePoint / OneDrive URL.'); return; }
+
+    const destSP    = document.getElementById('dest-sp-toggle').checked
+        ? document.getElementById('cloud-dest-sp-url').value.trim() : null;
+    const destLocal = document.getElementById('dest-local-toggle').checked
+        ? document.getElementById('cloud-dest-local-dir').value.trim() : null;
+
+    if (!destSP && !destLocal) {
+        alert('Please select at least one destination (SharePoint or local folder).');
+        return;
+    }
+
+    setCloudProgress(true, 'Converting…', 0);
+
+    fetch('/cloud/convert', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source_url: sourceUrl, dest_sharepoint_url: destSP, local_output_dir: destLocal }),
+    })
+    .then(async r => {
+        if (!r.ok) {
+            const p = await r.json().catch(() => ({}));
+            throw new Error(p.detail || `HTTP ${r.status}`);
+        }
+        return r.json();
+    })
+    .then(data => {
+        logCloudLine(`${data.filename} — converted in ${data.elapsed_ms} ms`, 'ok');
+        if (data.sharepoint_url) logCloudLine(`SharePoint: ${data.sharepoint_url}`, 'ok');
+        if (data.local_path)     logCloudLine(`Local: ${data.local_path}`, 'ok');
+        setCloudProgress(false, 'Done', 100);
+    })
+    .catch(err => {
+        logCloudLine('Error: ' + err.message, 'fail');
+        setCloudProgress(false, 'Failed', 100);
+    });
+}
+
+// ── Cloud batch convert ───────────────────────────────────────────────────
+function cloudBatch() {
+    const sourceUrl = document.getElementById('cloud-source-url').value.trim();
+    if (!sourceUrl) { alert('Please enter a source folder URL.'); return; }
+
+    const destSP    = document.getElementById('dest-sp-toggle').checked
+        ? document.getElementById('cloud-dest-sp-url').value.trim() : null;
+    const destLocal = document.getElementById('dest-local-toggle').checked
+        ? document.getElementById('cloud-dest-local-dir').value.trim() : null;
+
+    if (!destSP && !destLocal) {
+        alert('Please select at least one destination (SharePoint or local folder).');
+        return;
+    }
+
+    setCloudProgress(true, 'Starting…', 0);
+    clearCloudLog();
+
+    let total = 0, done = 0;
+
+    fetchSSE('/cloud/batch-convert',
+        { source_folder_url: sourceUrl, dest_sharepoint_url: destSP, local_output_dir: destLocal },
+        event => {
+            const d = JSON.parse(event.data);
+            if (d.type === 'start') {
+                total = d.total;
+                setCloudProgress(true, `0 / ${total}`, 0);
+            } else if (d.type === 'file') {
+                done++;
+                const pct = total ? Math.round((done / total) * 100) : 0;
+                const ok  = d.status === 'success';
+                logCloudLine(`[${done}/${total}] ${d.file} — ${ok ? 'ok' : 'FAILED: ' + d.error}`, ok ? 'ok' : 'fail');
+                setCloudProgress(true, `${done} / ${total}`, pct);
+            } else if (d.type === 'summary') {
+                const s = d.succeeded.length, f = Object.keys(d.failed || {}).length;
+                logCloudLine(`Done. ${s} succeeded, ${f} failed.`, f === 0 ? 'ok' : 'fail');
+                setCloudProgress(false, 'Complete', 100);
+            } else if (d.type === 'error') {
+                logCloudLine('Error: ' + d.message, 'fail');
+                setCloudProgress(false, 'Failed', 100);
+            }
+        },
+        err => {
+            if (err) { logCloudLine('Connection error: ' + err.message, 'fail'); setCloudProgress(false, 'Failed', 100); }
+        }
+    );
+}
+
+// ── Progress helpers ──────────────────────────────────────────────────────
+function setCloudProgress(visible, label, pct) {
+    const wrap = document.getElementById('cloud-progress');
+    wrap.classList.toggle('hidden', !visible);
+    document.getElementById('progress-label').textContent = label;
+    document.getElementById('progress-pct').textContent   = pct + '%';
+    document.getElementById('progress-fill').style.width  = pct + '%';
+}
+function logCloudLine(text, cls) {
+    const log = document.getElementById('progress-log');
+    const div = document.createElement('div');
+    div.textContent = text;
+    if (cls) div.className = cls;
+    log.appendChild(div);
+    log.scrollTop = log.scrollHeight;
+}
+function clearCloudLog() {
+    document.getElementById('progress-log').innerHTML = '';
+}
 </script>
 </body>
 </html>

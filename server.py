@@ -1,4 +1,5 @@
 import asyncio
+import io
 import json
 import os
 import queue
@@ -6,6 +7,7 @@ import shutil
 import tempfile
 import re
 import threading
+import zipfile
 from pathlib import Path
 from typing import List, Optional
 
@@ -21,6 +23,8 @@ from protected_file_access import (
     test_protected_file_access,
 )
 from word_dispatch_pipeline import batch_convert as word_dispatch_batch_convert
+from graph_auth import get_auth_client
+from cloud_converter import batch_convert_cloud
 
 app = FastAPI()
 
@@ -353,6 +357,253 @@ async def batch_convert_sse(data: dict = Body(...)):
             "Connection": "keep-alive",
         },
     )
+
+# ---------------------------------------------------------------------------
+# Cloud mode — protection check
+# ---------------------------------------------------------------------------
+
+
+@app.post("/check-protection")
+async def check_protection(file: UploadFile = File(...)):
+    """
+    Return whether an uploaded .docx is DLP/IRM-protected.
+    A valid OOXML file is a ZIP archive; protected files are not.
+    """
+    raw = await file.read()
+    protected = not zipfile.is_zipfile(io.BytesIO(raw))
+    return {"filename": file.filename, "protected": protected}
+
+
+# ---------------------------------------------------------------------------
+# Cloud mode — auth endpoints
+# ---------------------------------------------------------------------------
+
+
+@app.get("/auth/status")
+async def auth_status():
+    """Return current authentication state."""
+    try:
+        client = get_auth_client()
+        authenticated = client.is_authenticated()
+        account = client.get_account() if authenticated else None
+        return {"authenticated": authenticated, "account": account}
+    except RuntimeError as exc:
+        # GRAPH_CLIENT_ID not set or msal not installed — cloud mode unavailable
+        return {"authenticated": False, "account": None, "error": str(exc)}
+
+
+@app.post("/auth/login")
+async def auth_login():
+    """
+    Initiate device-code flow and stream progress as SSE.
+
+    Events:
+      {"type": "code", "user_code": "...", "verification_uri": "..."}
+      {"type": "success", "account": "user@tenant.com"}
+      {"type": "error", "message": "..."}
+    """
+    try:
+        client = get_auth_client()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+
+    try:
+        flow = client.start_device_code_flow()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    event_queue: "queue.Queue[dict | None]" = queue.Queue()
+
+    def _poll() -> None:
+        try:
+            client.complete_device_code_flow(flow)
+            account = client.get_account()
+            event_queue.put({"type": "success", "account": account})
+        except RuntimeError as exc:
+            event_queue.put({"type": "error", "message": str(exc)})
+        finally:
+            event_queue.put(None)
+
+    event_queue.put({
+        "type": "code",
+        "user_code": flow["user_code"],
+        "verification_uri": flow["verification_uri"],
+    })
+    threading.Thread(target=_poll, daemon=True, name="auth-poll").start()
+
+    async def _stream():
+        while True:
+            item = await asyncio.to_thread(event_queue.get)
+            if item is None:
+                break
+            yield f"data: {json.dumps(item)}\n\n"
+
+    return StreamingResponse(
+        _stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+    )
+
+
+@app.post("/auth/logout")
+async def auth_logout():
+    """Remove the cached account and wipe the token cache."""
+    try:
+        client = get_auth_client()
+        client.logout()
+        return {"status": "logged_out"}
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+
+
+# ---------------------------------------------------------------------------
+# Cloud mode — single file convert
+# ---------------------------------------------------------------------------
+
+
+@app.post("/cloud/convert")
+async def cloud_convert(data: dict = Body(...)):
+    """
+    Convert a single SharePoint/OneDrive .docx to Markdown.
+
+    Body:
+      {
+        "source_url": "https://tenant.sharepoint.com/sites/...",
+        "dest_sharepoint_url": "https://..." | null,
+        "local_output_dir": "/path/..." | null
+      }
+    """
+    source_url = (data or {}).get("source_url", "").strip()
+    dest_sp_url = (data or {}).get("dest_sharepoint_url") or None
+    local_dir = (data or {}).get("local_output_dir") or None
+
+    if not source_url:
+        raise HTTPException(status_code=400, detail="source_url is required.")
+    if not dest_sp_url and not local_dir:
+        raise HTTPException(
+            status_code=400,
+            detail="Supply at least one of dest_sharepoint_url or local_output_dir."
+        )
+
+    try:
+        client = get_auth_client()
+        token = client.get_token()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=401, detail=str(exc))
+
+    try:
+        from graph_client import resolve_url, resolve_output_folder  # noqa: PLC0415
+        from cloud_converter import convert_cloud_file               # noqa: PLC0415
+
+        drive_id, item_id = resolve_url(source_url, token)
+
+        dest_drive_id: Optional[str] = None
+        dest_folder_id: Optional[str] = None
+        if dest_sp_url:
+            dest_drive_id, dest_folder_id = resolve_output_folder(dest_sp_url, token)
+
+        import urllib.parse  # noqa: PLC0415
+        filename = urllib.parse.unquote(source_url.rstrip("/").rsplit("/", 1)[-1])
+        if not filename.lower().endswith(".docx"):
+            filename = filename + ".docx"
+
+        result = convert_cloud_file(
+            drive_id=drive_id,
+            item_id=item_id,
+            filename=filename,
+            token=token,
+            dest_drive_id=dest_drive_id,
+            dest_folder_id=dest_folder_id,
+            local_output_dir=local_dir,
+        )
+        return result
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ---------------------------------------------------------------------------
+# Cloud mode — batch convert (SSE)
+# ---------------------------------------------------------------------------
+
+
+@app.post("/cloud/batch-convert")
+async def cloud_batch_convert(data: dict = Body(...)):
+    """
+    Batch-convert all .docx files in a SharePoint/OneDrive folder.
+
+    Body:
+      {
+        "source_folder_url": "https://...",
+        "dest_sharepoint_url": "https://..." | null,
+        "local_output_dir": "/path/..." | null,
+        "max_workers": 4
+      }
+
+    Streams SSE events:
+      {"type": "start", "total": N}
+      {"type": "file", "file": name, "status": "success"|"failed", ...}
+      {"type": "summary", "succeeded": [...], "failed": {...}}
+    """
+    source_folder_url = (data or {}).get("source_folder_url", "").strip()
+    dest_sp_url = (data or {}).get("dest_sharepoint_url") or None
+    local_dir = (data or {}).get("local_output_dir") or None
+    max_workers = int((data or {}).get("max_workers", 4))
+
+    if not source_folder_url:
+        raise HTTPException(status_code=400, detail="source_folder_url is required.")
+    if not dest_sp_url and not local_dir:
+        raise HTTPException(
+            status_code=400,
+            detail="Supply at least one of dest_sharepoint_url or local_output_dir."
+        )
+    if max_workers < 1:
+        raise HTTPException(status_code=400, detail="max_workers must be >= 1.")
+
+    try:
+        client = get_auth_client()
+        token = client.get_token()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=401, detail=str(exc))
+
+    event_queue: "queue.Queue[dict | None]" = queue.Queue()
+
+    def _emit(event: dict) -> None:
+        event_queue.put(event)
+
+    def _run() -> None:
+        try:
+            batch_convert_cloud(
+                source_folder_url=source_folder_url,
+                token=token,
+                dest_sharepoint_url=dest_sp_url,
+                local_output_dir=local_dir,
+                max_workers=max_workers,
+                progress_callback=_emit,
+            )
+        except Exception as exc:
+            event_queue.put({"type": "error", "message": str(exc)})
+        finally:
+            event_queue.put(None)
+
+    threading.Thread(target=_run, daemon=True, name="cloud-batch-sse").start()
+
+    async def _stream():
+        while True:
+            item = await asyncio.to_thread(event_queue.get)
+            if item is None:
+                break
+            yield f"data: {json.dumps(item)}\n\n"
+
+    return StreamingResponse(
+        _stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+    )
+
 
 if __name__ == "__main__":
     import uvicorn
