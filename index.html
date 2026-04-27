@@ -1076,9 +1076,9 @@ function fetchSSE(url, body, onEvent, onDone) {
 }
 
 // ── Cloud single convert ──────────────────────────────────────────────────
-function cloudConvertSingle() {
+async function cloudConvertSingle() {
     const sourceUrl = document.getElementById('cloud-source-url').value.trim();
-    if (!sourceUrl) { alert('Please enter a source SharePoint / OneDrive URL.'); return; }
+    if (!sourceUrl) { alert('Please enter a source URL.'); return; }
 
     const destSP    = document.getElementById('dest-sp-toggle').checked
         ? document.getElementById('cloud-dest-sp-url').value.trim() : null;
@@ -1086,34 +1086,78 @@ function cloudConvertSingle() {
         ? document.getElementById('cloud-dest-local-dir').value.trim() : null;
 
     if (!destSP && !destLocal) {
-        alert('Please select at least one destination (SharePoint or local folder).');
+        alert('Please select at least one destination.');
         return;
     }
 
-    setCloudProgress(true, 'Converting…', 0);
+    document.getElementById('btn-cloud-convert').disabled = true;
+    document.getElementById('btn-cloud-batch').disabled   = true;
+    setCloudProgress(true, 'Converting…', 10);
+    clearCloudLog();
 
-    fetch('/cloud/convert', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ source_url: sourceUrl, dest_sharepoint_url: destSP, local_output_dir: destLocal }),
-    })
-    .then(async r => {
-        if (!r.ok) {
-            const p = await r.json().catch(() => ({}));
-            throw new Error(p.detail || `HTTP ${r.status}`);
+    try {
+        const res = await fetch('/cloud/convert', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                source_url:          sourceUrl,
+                dest_sharepoint_url: destSP,
+                local_output_dir:    destLocal
+            })
+        });
+
+        const data = await res.json().catch(() => ({}));
+
+        if (!res.ok) {
+            const msg = (data && data.detail) ? data.detail : `HTTP ${res.status}`;
+            logCloudLine('Error: ' + msg, 'fail');
+            setCloudProgress(false, 'Failed', 100);
+
+            if (data && data.markdown) {
+                openInEditor(
+                    data.markdown,
+                    sourceUrl.split('/').pop().replace(/\.docx$/i, '')
+                );
+                logCloudLine('Partial output opened in editor for review.', 'fail');
+            }
+            return;
         }
-        return r.json();
-    })
-    .then(data => {
-        logCloudLine(`${data.filename} — converted in ${data.elapsed_ms} ms`, 'ok');
-        if (data.sharepoint_url) logCloudLine(`SharePoint: ${data.sharepoint_url}`, 'ok');
-        if (data.local_path)     logCloudLine(`Local: ${data.local_path}`, 'ok');
+
         setCloudProgress(false, 'Done', 100);
-    })
-    .catch(err => {
-        logCloudLine('Error: ' + err.message, 'fail');
+        if (data.sharepoint_url) logCloudLine('SharePoint: ' + data.sharepoint_url, 'ok');
+        if (data.local_path)     logCloudLine('Local: ' + data.local_path, 'ok');
+        logCloudLine(`Converted in ${data.elapsed_ms}ms`, 'ok');
+
+        if (data.markdown) {
+            openInEditor(
+                data.markdown,
+                (data.filename || 'converted').replace(/\.md$/i, '')
+            );
+        }
+    } catch (err) {
+        logCloudLine('Network error: ' + err.message, 'fail');
         setCloudProgress(false, 'Failed', 100);
-    });
+    } finally {
+        document.getElementById('btn-cloud-convert').disabled = false;
+        document.getElementById('btn-cloud-batch').disabled   = false;
+    }
+}
+
+function openInEditor(markdown, docName) {
+    const editor = document.getElementById('markdown-editor');
+    if (editor) editor.value = markdown;
+    currentFileName = docName;
+    serverSavedPath = null;
+    isServerDoc     = false;
+    if (typeof clearDirty === 'function') clearDirty();
+    if (typeof switchMode === 'function') switchMode('local');
+    document.getElementById('step-upload').classList.add('hidden');
+    document.getElementById('step-workspace').classList.remove('hidden');
+    const folderBtn = document.getElementById('btn-open-folder');
+    if (folderBtn) folderBtn.classList.add('hidden');
+    const editTab = document.getElementById('btn-tab-edit');
+    if (editTab) editTab.click();
+    if (typeof updatePreview === 'function') updatePreview();
 }
 
 // ── Cloud batch convert ───────────────────────────────────────────────────

@@ -546,6 +546,9 @@ async def auth_logout():
 
 @app.post("/cloud/convert")
 async def cloud_convert(data: dict = Body(...)):
+    import traceback
+    import urllib.parse
+
     source_url = (data or {}).get("source_url", "").strip()
     dest_sp_url = (data or {}).get("dest_sharepoint_url") or None
     local_dir = (data or {}).get("local_output_dir") or None
@@ -555,47 +558,93 @@ async def cloud_convert(data: dict = Body(...)):
     if not dest_sp_url and not local_dir:
         raise HTTPException(status_code=400, detail="Supply at least one of dest_sharepoint_url or local_output_dir.")
 
-    try:
-        client = get_auth_client()
-        token = client.get_token()
-    except RuntimeError as exc:
-        raise HTTPException(status_code=401, detail=str(exc))
+    start = time.time()
+    logger.info(f"[CONVERT] start | source={source_url}")
 
     try:
-        from graph_client import resolve_url, resolve_output_folder  # noqa: PLC0415
-        from cloud_converter import convert_cloud_file               # noqa: PLC0415
+        # Step 1 — Get token (hard timeout)
+        auth = GraphAuthClient()
+        try:
+            token = await auth.get_token_async()
+            logger.info("[CONVERT] token acquired")
+        except Exception as e:
+            logger.error(f"[CONVERT] token failed | {e}")
+            raise HTTPException(status_code=401, detail=f"Authentication failed: {str(e)}")
 
-        drive_id, item_id = resolve_url(source_url, token)
+        from graph_client import resolve_url, resolve_output_folder, download_file_bytes, upload_markdown  # noqa: PLC0415
+        from cloud_converter import _docx_bytes_to_markdown, is_protected  # noqa: PLC0415
 
-        dest_drive_id: Optional[str] = None
-        dest_folder_id: Optional[str] = None
+        # Step 2 — Resolve source URL
+        try:
+            drive_id, item_id = await asyncio.to_thread(resolve_url, source_url, token)
+            logger.info(f"[CONVERT] resolved source | drive={drive_id} item={item_id}")
+        except Exception as e:
+            logger.error(f"[CONVERT] resolve failed | {e}")
+            raise HTTPException(status_code=400, detail=f"Could not resolve source URL: {str(e)}")
+
+        # Step 3 — Download
+        try:
+            file_bytes = await asyncio.to_thread(download_file_bytes, drive_id, item_id, token)
+            logger.info(f"[CONVERT] downloaded | {len(file_bytes)} bytes")
+        except Exception as e:
+            logger.error(f"[CONVERT] download failed | {e}")
+            raise HTTPException(status_code=400, detail=f"Download failed: {str(e)}")
+
+        if is_protected(file_bytes):
+            msg = "File appears to be DLP/IRM-protected and cannot be converted via cloud mode. Use Batch (Local) mode instead."
+            logger.error(f"[CONVERT] protected | {source_url}")
+            raise HTTPException(status_code=422, detail=msg)
+
+        # Step 4 — Convert
+        try:
+            markdown = await asyncio.to_thread(_docx_bytes_to_markdown, file_bytes)
+            logger.info(f"[CONVERT] converted | {len(markdown)} chars")
+        except Exception as e:
+            logger.error(f"[CONVERT] conversion failed | {e}\n{traceback.format_exc()}")
+            raise HTTPException(status_code=422, detail=f"Conversion failed: {str(e)}")
+
+        # Step 5 — Save outputs
+        raw_name = urllib.parse.unquote(source_url.rstrip("/").split("/")[-1])
+        stem = raw_name[:-5] if raw_name.lower().endswith(".docx") else raw_name
+        md_filename = f"{stem}.md"
+        results: dict = {"filename": md_filename, "sharepoint_url": None, "local_path": None}
+
         if dest_sp_url:
-            dest_drive_id, dest_folder_id = resolve_output_folder(dest_sp_url, token)
+            try:
+                dest_drive_id, dest_folder_id = await asyncio.to_thread(resolve_output_folder, dest_sp_url, token)
+                sp_url = await asyncio.to_thread(
+                    upload_markdown, dest_drive_id, dest_folder_id, md_filename, markdown, token
+                )
+                results["sharepoint_url"] = sp_url
+                logger.info(f"[CONVERT] uploaded to SharePoint | {sp_url}")
+            except Exception as e:
+                logger.error(f"[CONVERT] SharePoint upload failed | {e}")
+                raise HTTPException(status_code=500, detail=f"SharePoint upload failed: {str(e)}")
 
-        import urllib.parse  # noqa: PLC0415
-        filename = urllib.parse.unquote(source_url.rstrip("/").rsplit("/", 1)[-1])
-        if not filename.lower().endswith(".docx"):
-            filename = filename + ".docx"
+        if local_dir:
+            try:
+                out = Path(local_dir) / md_filename
+                out.parent.mkdir(parents=True, exist_ok=True)
+                out.write_text(markdown, encoding="utf-8")
+                results["local_path"] = str(out)
+                logger.info(f"[CONVERT] saved locally | {out}")
+            except Exception as e:
+                logger.error(f"[CONVERT] local save failed | {e}")
+                raise HTTPException(status_code=500, detail=f"Local save failed: {str(e)}")
 
-        result = convert_cloud_file(
-            drive_id=drive_id,
-            item_id=item_id,
-            filename=filename,
-            token=token,
-            dest_drive_id=dest_drive_id,
-            dest_folder_id=dest_folder_id,
-            local_output_dir=local_dir,
+        elapsed = round((time.time() - start) * 1000)
+        logger.info(f"[CONVERT] done | {md_filename} | {elapsed}ms")
+        return {**results, "elapsed_ms": elapsed, "markdown": markdown}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        elapsed = round((time.time() - start) * 1000)
+        logger.exception(f"[CONVERT] unhandled error | {elapsed}ms | {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Unexpected error: {str(e)}\n{traceback.format_exc()}",
         )
-        return result
-    except PermissionError as exc:
-        logger.error(f"[CONVERT] fail  | file={source_url} | mode=cloud | error={exc}")
-        raise HTTPException(status_code=403, detail=str(exc))
-    except FileNotFoundError as exc:
-        logger.error(f"[CONVERT] fail  | file={source_url} | mode=cloud | error={exc}")
-        raise HTTPException(status_code=404, detail=str(exc))
-    except Exception as exc:
-        logger.exception(f"Unhandled error in /cloud/convert: {exc}")
-        raise HTTPException(status_code=500, detail=str(exc))
 
 
 # ---------------------------------------------------------------------------
@@ -617,10 +666,12 @@ async def cloud_batch_convert(data: dict = Body(...)):
         raise HTTPException(status_code=400, detail="max_workers must be >= 1.")
 
     try:
-        client = get_auth_client()
-        token = client.get_token()
+        client = GraphAuthClient()
+        token = await client.get_token_async()
     except RuntimeError as exc:
         raise HTTPException(status_code=401, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=401, detail=f"Authentication failed: {exc}")
 
     logger.info(f"[CONVERT] start | mode=batch-cloud | source={source_folder_url} | workers={max_workers}")
 
