@@ -492,6 +492,30 @@
             </div>
         </div>
 
+        <!-- Protected-file warning -->
+        <div class="cloud-protected-warning" style="
+            margin: 0.6rem 0 0.4rem;
+            padding: 0.7rem 0.9rem;
+            border-left: 4px solid #d97706;
+            background: var(--color-warn-bg);
+            color: var(--color-warn-text);
+            font-size: 0.83rem;
+            border-radius: 0 var(--radius-sm) var(--radius-sm) 0;">
+            <strong>Protected files:</strong> Protected files can only be
+            converted or edited if your account and this application are
+            allowed by your organization's Microsoft Purview policies. The
+            app will not bypass DLP, encryption, or sensitivity labels.
+        </div>
+
+        <!-- Cloud-mode state badge -->
+        <div id="cloud-state-badge" class="hidden" style="
+            margin: 0.2rem 0 0.4rem;
+            padding: 0.4rem 0.7rem;
+            border-radius: var(--radius-sm);
+            font-size: 0.78rem;
+            font-weight: 600;
+            display: inline-block;"></div>
+
         <!-- Actions -->
         <div class="cloud-actions">
             <button id="btn-cloud-convert" onclick="cloudConvertSingle()" disabled>Convert Single File</button>
@@ -1076,6 +1100,24 @@ function fetchSSE(url, body, onEvent, onDone) {
 }
 
 // ── Cloud single convert ──────────────────────────────────────────────────
+function setCloudStateBadge(state) {
+    // state: null | 'normal' | 'protected-allowed' | 'protected-denied' | 'reapply-failed'
+    const el = document.getElementById('cloud-state-badge');
+    if (!el) return;
+    if (!state) { el.classList.add('hidden'); el.textContent = ''; return; }
+    const styles = {
+        'normal':            { bg: '#e0f2fe', fg: '#0369a1', text: 'Cloud file' },
+        'protected-allowed': { bg: '#ecfdf5', fg: '#065f46', text: 'Protected · access allowed' },
+        'protected-denied':  { bg: '#fef2f2', fg: '#991b1b', text: 'Protected · access denied by Purview' },
+        'reapply-failed':    { bg: '#fef2f2', fg: '#991b1b', text: 'Re-protection failed · upload blocked' },
+    };
+    const s = styles[state] || styles['normal'];
+    el.style.background = s.bg;
+    el.style.color = s.fg;
+    el.textContent = s.text;
+    el.classList.remove('hidden');
+}
+
 async function cloudConvertSingle() {
     const sourceUrl = document.getElementById('cloud-source-url').value.trim();
     if (!sourceUrl) { alert('Please enter a source URL.'); return; }
@@ -1092,10 +1134,15 @@ async function cloudConvertSingle() {
 
     document.getElementById('btn-cloud-convert').disabled = true;
     document.getElementById('btn-cloud-batch').disabled   = true;
-    setCloudProgress(true, 'Converting…', 10);
+    setCloudStateBadge(null);
+    setCloudProgress(true, 'Resolving cloud file...', 10);
     clearCloudLog();
+    logCloudLine('Resolving cloud file...');
 
     try {
+        setCloudProgress(true, 'Downloading cloud file...', 25);
+        logCloudLine('Downloading cloud file...');
+
         const res = await fetch('/cloud/convert', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1110,7 +1157,16 @@ async function cloudConvertSingle() {
 
         if (!res.ok) {
             const msg = (data && data.detail) ? data.detail : `HTTP ${res.status}`;
-            logCloudLine('Error: ' + msg, 'fail');
+            // Map MIP-related 422s to UI states.
+            if (res.status === 422 && /purview|denied|rights|access/i.test(msg)) {
+                setCloudStateBadge('protected-denied');
+                logCloudLine('Access denied by Microsoft Purview policy.', 'fail');
+            } else if (res.status === 422 && /reappl|protection.*could not/i.test(msg)) {
+                setCloudStateBadge('reapply-failed');
+                logCloudLine('Protection could not be reapplied. Upload blocked.', 'fail');
+            } else {
+                logCloudLine('Error: ' + msg, 'fail');
+            }
             setCloudProgress(false, 'Failed', 100);
 
             if (data && data.markdown) {
@@ -1121,6 +1177,24 @@ async function cloudConvertSingle() {
                 logCloudLine('Partial output opened in editor for review.', 'fail');
             }
             return;
+        }
+
+        // Success path. Surface the protected-file workflow when applicable.
+        if (data.protected) {
+            setCloudStateBadge('protected-allowed');
+            setCloudProgress(true, 'Protected file detected. Checking permissions...', 45);
+            logCloudLine('Protected file detected. Checking permissions...');
+            logCloudLine('Creating protected-file working copy...');
+            logCloudLine('Editing working copy...');
+            if (data.sharepoint_url) {
+                logCloudLine('Reapplying original protection...');
+                logCloudLine('Uploading protected output...');
+            }
+            if (data.label_name) {
+                logCloudLine('Sensitivity label: ' + data.label_name, 'ok');
+            }
+        } else {
+            setCloudStateBadge('normal');
         }
 
         setCloudProgress(false, 'Done', 100);

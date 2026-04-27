@@ -28,6 +28,15 @@ from protected_file_access import (
 from word_dispatch_pipeline import batch_convert as word_dispatch_batch_convert
 from graph_auth import get_auth_client, GraphAuthClient
 from cloud_converter import batch_convert_cloud
+from mip_helper_client import (
+    inspect_file as mip_inspect_file,
+    unprotect_file as mip_unprotect_file,
+    reapply_protection as mip_reapply_protection,
+    cleanup_paths as mip_cleanup_paths,
+    MipAccessDeniedError,
+    MipReapplyFailedError,
+    MipHelperError,
+)
 
 logger = setup_logging()
 
@@ -591,9 +600,109 @@ async def cloud_convert(data: dict = Body(...)):
             raise HTTPException(status_code=400, detail=f"Download failed: {str(e)}")
 
         if is_protected(file_bytes):
-            msg = "File appears to be DLP/IRM-protected and cannot be converted via cloud mode. Use Batch (Local) mode instead."
-            logger.error(f"[CONVERT] protected | {source_url}")
-            raise HTTPException(status_code=422, detail=msg)
+            logger.info(f"[CONVERT] protected detected | {source_url}")
+            tmp_dir = Path(tempfile.mkdtemp(prefix="mip-src-"))
+            tmp_input = tmp_dir / "source.docx"
+            tmp_input.write_bytes(file_bytes)
+
+            meta = None
+            working = None
+            final = None
+            try:
+                # MIP step 1 — capture label/protection metadata.
+                try:
+                    meta = await asyncio.to_thread(mip_inspect_file, tmp_input)
+                    logger.info(
+                        f"[MIP] inspected | label={meta.label_name} id={meta.label_id} protected={meta.is_protected}"
+                    )
+                except MipHelperError as e:
+                    logger.error(f"[MIP] inspect failed | {e}")
+                    raise HTTPException(status_code=500, detail=f"MIP inspect failed: {e}")
+
+                # MIP step 2 — request a decrypted working copy.
+                try:
+                    working = await asyncio.to_thread(
+                        mip_unprotect_file, tmp_input, meta.metadata_path,
+                        os.environ.get("MIP_USER_UPN"),
+                    )
+                    logger.info(f"[MIP] decrypt allowed | working={working.name}")
+                except MipAccessDeniedError as e:
+                    logger.warning(f"[MIP] denied | {e}")
+                    raise HTTPException(
+                        status_code=422,
+                        detail=(
+                            "Access denied by Microsoft Purview policy. "
+                            "Your account does not have rights to view, edit, or export this file."
+                        ),
+                    )
+                except MipHelperError as e:
+                    logger.error(f"[MIP] unprotect failed | {e}")
+                    raise HTTPException(status_code=500, detail=f"MIP unprotect failed: {e}")
+
+                # MIP step 3 — convert the decrypted working copy.
+                try:
+                    working_bytes = working.read_bytes()
+                    markdown = await asyncio.to_thread(_docx_bytes_to_markdown, working_bytes)
+                    logger.info(f"[CONVERT] edit completed | {len(markdown)} chars")
+                except Exception as e:
+                    logger.error(f"[CONVERT] protected conversion failed | {e}\n{traceback.format_exc()}")
+                    raise HTTPException(status_code=422, detail=f"Conversion failed: {str(e)}")
+
+                # MIP step 4 — write outputs. If uploading the .docx form back
+                # to SharePoint, we MUST reapply the original protection first.
+                raw_name = urllib.parse.unquote(source_url.rstrip("/").split("/")[-1])
+                stem = raw_name[:-5] if raw_name.lower().endswith(".docx") else raw_name
+                md_filename = f"{stem}.md"
+                results: dict = {
+                    "filename": md_filename,
+                    "sharepoint_url": None,
+                    "local_path": None,
+                    "protected": True,
+                    "label_name": meta.label_name,
+                }
+
+                if dest_sp_url:
+                    # The current pipeline uploads Markdown (an unprotected
+                    # text artifact) — we refuse this for protected sources to
+                    # avoid creating an unlabeled copy of confidential content.
+                    logger.warning("[MIP] refusing to upload markdown of a protected file")
+                    raise HTTPException(
+                        status_code=422,
+                        detail=(
+                            "Protected files cannot be exported to SharePoint as Markdown. "
+                            "Save locally instead, or extend the pipeline to upload an edited "
+                            ".docx with reapplied protection."
+                        ),
+                    )
+
+                if local_dir:
+                    try:
+                        out = Path(local_dir) / md_filename
+                        out.parent.mkdir(parents=True, exist_ok=True)
+                        out.write_text(markdown, encoding="utf-8")
+                        results["local_path"] = str(out)
+                        logger.info(f"[CONVERT] saved locally | {out}")
+                    except Exception as e:
+                        logger.error(f"[CONVERT] local save failed | {e}")
+                        raise HTTPException(status_code=500, detail=f"Local save failed: {str(e)}")
+
+                elapsed = round((time.time() - start) * 1000)
+                logger.info(f"[CONVERT] done (protected) | {md_filename} | {elapsed}ms")
+                return {**results, "elapsed_ms": elapsed, "markdown": markdown}
+
+            finally:
+                try:
+                    paths = [tmp_input, tmp_dir]
+                    if working is not None:
+                        paths.append(working)
+                    if final is not None:
+                        paths.append(final)
+                    if meta is not None:
+                        paths.append(meta.metadata_path)
+                    mip_cleanup_paths(*paths)
+                    logger.info("[MIP] cleanup done")
+                except Exception as e:
+                    logger.warning(f"[MIP] cleanup error | {e}")
 
         # Step 4 — Convert
         try:

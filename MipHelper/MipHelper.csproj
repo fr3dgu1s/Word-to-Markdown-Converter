@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>WordToMd.MipHelper</RootNamespace>
+    <AssemblyName>MipHelper</AssemblyName>
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      The MIP SDK NuGet packages below require an approved MIP SDK
+      application registration (https://aka.ms/mipsdkapponboarding).
+      Replace the version numbers with the latest stable releases supported
+      by your tenant once you have the app onboarded.
+    -->
+    <PackageReference Include="Microsoft.InformationProtection.File" Version="1.16.137" />
+    <PackageReference Include="Microsoft.Identity.Client" Version="4.66.2" />
+    <PackageReference Include="System.CommandLine" Version="2.0.0-beta4.22272.1" />
+    <PackageReference Include="System.Text.Json" Version="8.0.5" />
+  </ItemGroup>
+
+</Project>
