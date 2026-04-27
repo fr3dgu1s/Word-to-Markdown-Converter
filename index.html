@@ -34,6 +34,7 @@
             --color-text-success:   #16a34a;
             --color-text-secondary: #4a5568;
             --color-text-danger:    #dc2626;
+            --color-text-warning:   #b45309;
         }
 
         @media (prefers-color-scheme: dark) {
@@ -56,6 +57,7 @@
                 --color-text-success:   #22c55e;
                 --color-text-secondary: #a0aec0;
                 --color-text-danger:    #ef4444;
+                --color-text-warning:   #fbbf24;
             }
         }
 
@@ -312,6 +314,38 @@
         #btn-cloud-batch   { background: var(--color-primary); color: #fff; }
         #btn-cloud-batch:hover { background: var(--color-primary-h); }
         #btn-cloud-convert:disabled, #btn-cloud-batch:disabled { opacity: 0.5; cursor: default; }
+
+        /* ── Log viewer ──────────────────────────────────────────────────────── */
+        .log-card { margin-top: 0.75rem; padding: 0; overflow: hidden; }
+        .log-header {
+            display: flex; align-items: center; gap: 0.6rem; padding: 0.7rem 1.1rem;
+            cursor: pointer; user-select: none; font-size: 0.88rem; font-weight: 600;
+            border-bottom: 1px solid transparent;
+        }
+        .log-header:hover { background: var(--color-surface-alt); }
+        .log-card.expanded .log-header { border-bottom-color: var(--color-border); }
+        .log-header-title { flex: 1; }
+        .log-header-actions { display: flex; gap: 0.4rem; }
+        .log-header-actions button {
+            padding: 0.2rem 0.6rem; font-size: 0.78rem; font-weight: 600;
+            border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+            background: var(--color-surface); color: var(--color-text); cursor: pointer;
+        }
+        .log-header-actions button:hover { border-color: var(--color-primary); color: var(--color-primary); }
+        .log-chevron { font-size: 0.7rem; color: var(--color-text-muted); transition: transform 0.15s; }
+        .log-card.expanded .log-chevron { transform: rotate(90deg); }
+        .log-body { display: none; padding: 0.5rem; }
+        .log-card.expanded .log-body { display: block; }
+        .log-lines {
+            max-height: 260px; overflow-y: auto; font-size: 12px; font-family: 'Courier New', monospace;
+            line-height: 1.55; background: var(--color-surface-alt);
+            border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+            padding: 0.5rem 0.75rem;
+        }
+        .log-lines .log-error   { color: var(--color-text-danger); }
+        .log-lines .log-warn    { color: var(--color-text-warning); }
+        .log-lines .log-info    { color: var(--color-text-secondary); }
+        .log-lines .log-empty   { color: var(--color-text-muted); font-style: italic; }
     </style>
 </head>
 <body>
@@ -476,6 +510,23 @@
 
     </div><!-- /cloud-panel -->
 </div><!-- /card -->
+
+<!-- Log viewer -->
+<div class="card log-card" id="log-card">
+    <div class="log-header" onclick="toggleLogs()">
+        <span class="log-header-title">Logs</span>
+        <div class="log-header-actions" onclick="event.stopPropagation()">
+            <button onclick="loadLogs()">Refresh</button>
+            <button onclick="clearLogs()">Clear</button>
+        </div>
+        <span class="log-chevron">▶</span>
+    </div>
+    <div class="log-body">
+        <div class="log-lines" id="log-lines">
+            <div class="log-empty">Expand to view logs…</div>
+        </div>
+    </div>
+</div>
 
 <!-- Save modal -->
 <div id="save-modal" class="modal-backdrop hidden">
@@ -1131,6 +1182,52 @@ function logCloudLine(text, cls) {
 }
 function clearCloudLog() {
     document.getElementById('progress-log').innerHTML = '';
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LOG VIEWER
+// ═══════════════════════════════════════════════════════════════════════════
+
+let _logInterval = null;
+
+function toggleLogs() {
+    const card = document.getElementById('log-card');
+    const expanded = card.classList.toggle('expanded');
+    if (expanded) {
+        loadLogs();
+        _logInterval = setInterval(loadLogs, 5000);
+    } else {
+        clearInterval(_logInterval);
+        _logInterval = null;
+    }
+}
+
+async function loadLogs() {
+    try {
+        const data = await fetch('/logs/latest?lines=100').then(r => r.json());
+        const el = document.getElementById('log-lines');
+        if (!data.lines || data.lines.length === 0) {
+            el.innerHTML = '<div class="log-empty">No log entries yet.</div>';
+            return;
+        }
+        el.innerHTML = data.lines.map(line => {
+            // formatter: "%(levelname)-8s" → "ERROR   " / "WARNING " / "INFO    "
+            let cls = 'log-info';
+            if (line.includes('| ERROR   |')) cls = 'log-error';
+            else if (line.includes('| WARNING |')) cls = 'log-warn';
+            return `<div class="${cls}">${escHtml(line)}</div>`;
+        }).join('');
+        el.scrollTop = el.scrollHeight;
+    } catch { /* server not ready yet */ }
+}
+
+async function clearLogs() {
+    await fetch('/logs/latest', { method: 'DELETE' });
+    loadLogs();
+}
+
+function escHtml(s) {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 </script>
 </body>

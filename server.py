@@ -6,17 +6,19 @@ import queue
 import shutil
 import subprocess
 import tempfile
+import time
 import re
 import threading
 import zipfile
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, Body
+from fastapi import FastAPI, Request, UploadFile, File, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, StreamingResponse
 
+from logging_config import setup_logging
 from protected_file_access import (
     convert_docx_with_docling_fallback,
     ProtectedFileAccessError,
@@ -27,20 +29,22 @@ from word_dispatch_pipeline import batch_convert as word_dispatch_batch_convert
 from graph_auth import get_auth_client, GraphAuthClient
 from cloud_converter import batch_convert_cloud
 
+logger = setup_logging()
+
 app = FastAPI()
 
 # ---------------------------------------------------------------------------
 # Docling is loaded lazily in a background thread so the HTTP server is
-# reachable within ~1 second of launch. Conversion endpoints wait if the
-# converter is not yet ready (usually it finishes before a user can upload).
+# reachable within ~1 second of launch.
 # ---------------------------------------------------------------------------
 _converter_ready = threading.Event()
-_converter = None          # set by _init_converter()
-_converter_error = None    # set if import/init fails
+_converter = None
+_converter_error = None
 
 
 def _init_converter() -> None:
     global _converter, _converter_error
+    logger.info("[INIT] Starting Docling converter initialisation")
     try:
         from docling.document_converter import DocumentConverter  # noqa: PLC0415
         from docling.datamodel.pipeline_options import PdfPipelineOptions  # noqa: PLC0415
@@ -48,8 +52,10 @@ def _init_converter() -> None:
         opts.generate_picture_images = True
         opts.images_scale = 2.0
         _converter = DocumentConverter()
+        logger.info("[INIT] Docling converter ready")
     except Exception as exc:
         _converter_error = str(exc)
+        logger.error(f"[INIT] Docling converter failed: {exc}")
     finally:
         _converter_ready.set()
 
@@ -66,12 +72,18 @@ def _get_converter():
         raise RuntimeError("Document converter is not available.")
     return _converter
 
-# 1. DIRECTORY CONFIG  — paths relative to this script's location
+
+# ---------------------------------------------------------------------------
+# Directory config
+# ---------------------------------------------------------------------------
+
 OUTPUTS_ROOT = Path(__file__).resolve().parent / "Outputs"
 GLOBAL_IMAGES_DIR = OUTPUTS_ROOT / "Images"
+LOGS_DIR = Path(__file__).resolve().parent / "logs"
 
 OUTPUTS_ROOT.mkdir(parents=True, exist_ok=True)
 GLOBAL_IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+
 
 def sanitize_name(name: str) -> str:
     clean = name.lower()
@@ -90,6 +102,7 @@ def get_unique_safe_name(base_name: str) -> str:
         counter += 1
     return safe_name
 
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -97,6 +110,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    start = time.time()
+    logger.info(f"→ {request.method} {request.url.path}")
+    response = await call_next(request)
+    elapsed = round((time.time() - start) * 1000)
+    logger.info(f"← {request.method} {request.url.path} {response.status_code} ({elapsed}ms)")
+    return response
+
+
+# ---------------------------------------------------------------------------
+# Core conversion helper
+# ---------------------------------------------------------------------------
 
 def convert_file_to_markdown(
     upload_file: UploadFile,
@@ -108,13 +135,16 @@ def convert_file_to_markdown(
     spec_image_folder = GLOBAL_IMAGES_DIR / safe_name
     spec_image_folder.mkdir(parents=True, exist_ok=True)
 
+    t0 = time.perf_counter()
+    logger.info(f"[CONVERT] start | file={upload_file.filename} | mode=local")
+
     tmp_path: Optional[Path] = None
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp:
             shutil.copyfileobj(upload_file.file, tmp)
             tmp_path = Path(tmp.name)
 
-        from docling_core.types.doc import PictureItem  # noqa: PLC0415  (lazy after init)
+        from docling_core.types.doc import PictureItem  # noqa: PLC0415
 
         def _docling_to_markdown(path: str) -> str:
             conv_res = _get_converter().convert(Path(path))
@@ -141,32 +171,36 @@ def convert_file_to_markdown(
         with open(md_file_path, "w", encoding="utf-8") as f:
             f.write(final_markdown)
 
-        result = {
-            "doc_name": safe_name,
-            "output_file": str(md_file_path),
-        }
+        elapsed_ms = int((time.perf_counter() - t0) * 1000)
+        logger.info(f"[CONVERT] done  | file={upload_file.filename} | elapsed={elapsed_ms}ms")
+
+        result = {"doc_name": safe_name, "output_file": str(md_file_path)}
         if include_markdown:
             result["markdown"] = final_markdown
-
         return result
+
+    except Exception as exc:
+        elapsed_ms = int((time.perf_counter() - t0) * 1000)
+        logger.error(f"[CONVERT] fail  | file={upload_file.filename} | elapsed={elapsed_ms}ms | error={exc}")
+        raise
     finally:
         if tmp_path and tmp_path.exists():
             tmp_path.unlink(missing_ok=True)
 
+
+# ---------------------------------------------------------------------------
+# Health / status
+# ---------------------------------------------------------------------------
+
 @app.get("/health")
 async def health_check():
-    """Lightweight liveness probe used by the launcher."""
     return {"ok": True}
 
 
 @app.get("/api/status")
 async def converter_status():
-    """Lets the UI show when the document engine is still warming up."""
     ready = _converter_ready.is_set() and _converter is not None
-    return {
-        "converter_ready": ready,
-        "error": _converter_error,
-    }
+    return {"converter_ready": ready, "error": _converter_error}
 
 
 @app.get("/api/protected-access-check")
@@ -185,16 +219,16 @@ async def protected_file_check(file: UploadFile = File(...)):
         with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp:
             shutil.copyfileobj(file.file, tmp)
             tmp_path = Path(tmp.name)
-
         result = test_protected_file_access(tmp_path)
-        return {
-            "file": filename,
-            **result,
-        }
+        return {"file": filename, **result}
     finally:
         if tmp_path and tmp_path.exists():
             tmp_path.unlink(missing_ok=True)
 
+
+# ---------------------------------------------------------------------------
+# Static / utility
+# ---------------------------------------------------------------------------
 
 @app.get("/")
 async def serve_index():
@@ -203,33 +237,38 @@ async def serve_index():
 
 app.mount("/Outputs", StaticFiles(directory=str(OUTPUTS_ROOT)), name="Outputs")
 
+
 @app.get("/api/open-folder")
 async def open_folder():
     os.startfile(OUTPUTS_ROOT)
     return {"status": "opened"}
 
+
 @app.post("/api/shutdown")
 async def shutdown_app():
-    print("Shutdown requested by local user.")
+    logger.info("[SHUTDOWN] Shutdown requested by local user")
 
     def stop_server():
-        import time
-        time.sleep(1)  # gives time for the response to return
+        time.sleep(1)
         os._exit(0)
 
     threading.Thread(target=stop_server, daemon=True).start()
     return {"status": "shutting_down"}
 
+
 @app.post("/api/save-changes")
 async def save_changes(data: dict = Body(...)):
     doc_name = data.get("doc_name")
     content = data.get("markdown")
-
     file_path = OUTPUTS_ROOT / f"{doc_name}.md"
     with open(file_path, "w", encoding="utf-8") as f:
         f.write(content)
-
     return {"status": "saved"}
+
+
+# ---------------------------------------------------------------------------
+# Local conversion endpoints
+# ---------------------------------------------------------------------------
 
 @app.post("/api/convert")
 async def convert_document(file: UploadFile = File(...)):
@@ -238,11 +277,12 @@ async def convert_document(file: UploadFile = File(...)):
         return {
             "markdown": single_result["markdown"],
             "doc_name": single_result["doc_name"],
-            "folder_created": str(OUTPUTS_ROOT)
+            "folder_created": str(OUTPUTS_ROOT),
         }
     except HTTPException:
         raise
     except Exception as e:
+        logger.exception(f"Unhandled error in /api/convert: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -258,33 +298,17 @@ async def convert_documents_batch(files: List[UploadFile] = File(...)):
     for upload_file in files:
         filename = upload_file.filename or ""
         if not filename.lower().endswith(".docx"):
-            skipped.append({
-                "file": filename,
-                "reason": "Only .docx files are supported for batch conversion.",
-            })
+            skipped.append({"file": filename, "reason": "Only .docx files are supported for batch conversion."})
             continue
-
         try:
             item = convert_file_to_markdown(upload_file, include_markdown=False)
-            converted.append({
-                "file": filename,
-                "doc_name": item["doc_name"],
-                "output_file": item["output_file"],
-            })
+            converted.append({"file": filename, "doc_name": item["doc_name"], "output_file": item["output_file"]})
         except Exception as exc:
-            failed.append({
-                "file": filename,
-                "error": str(exc),
-            })
+            logger.exception(f"Unhandled error in /api/convert-batch for {filename}: {exc}")
+            failed.append({"file": filename, "error": str(exc)})
 
     if not converted and not skipped and failed:
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "message": "Batch conversion failed for all eligible files.",
-                "failed": failed,
-            },
-        )
+        raise HTTPException(status_code=500, detail={"message": "Batch conversion failed for all eligible files.", "failed": failed})
 
     return {
         "folder_created": str(OUTPUTS_ROOT),
@@ -299,15 +323,7 @@ async def convert_documents_batch(files: List[UploadFile] = File(...)):
 
 @app.post("/batch-convert")
 async def batch_convert_sse(data: dict = Body(...)):
-    """
-    Batch-convert DLP/IRM-protected .docx files to Markdown.
-
-    Spawns a hidden Word instance once to handle RMS decryption, saves clean
-    temp copies, then converts them in parallel with Docling.
-    Streams Server-Sent Events: one per file, then a final summary object.
-
-    Body: { "input_folder": "...", "output_folder": "...", "max_workers": 4 }
-    """
+    """Batch-convert DLP/IRM-protected .docx files via Word COM + Docling (SSE)."""
     input_folder = (data or {}).get("input_folder")
     output_folder = (data or {}).get("output_folder")
     max_workers = int((data or {}).get("max_workers", 4))
@@ -319,15 +335,18 @@ async def batch_convert_sse(data: dict = Body(...)):
     if max_workers < 1:
         raise HTTPException(status_code=400, detail="max_workers must be >= 1.")
 
+    logger.info(f"[CONVERT] start | mode=batch-local | input={input_folder} | workers={max_workers}")
+
     event_queue: "queue.Queue[dict | None]" = queue.Queue()
 
     def _emit(event: dict) -> None:
+        if event.get("status") == "done":
+            logger.info(f"[CONVERT] done  | file={event.get('file')} | elapsed={event.get('elapsed_ms')}ms | mode=batch-local")
+        elif event.get("status") == "failed":
+            logger.error(f"[CONVERT] fail  | file={event.get('file')} | error={event.get('error')} | mode=batch-local")
         event_queue.put(event)
 
     def _run_batch() -> None:
-        # Word COM must run on the thread that called CoInitialize — batch_convert
-        # handles start_word() and CoUninitialize internally, so this thread owns
-        # the COM apartment for the entire batch.
         try:
             summary = word_dispatch_batch_convert(
                 input_folder=input_folder,
@@ -337,9 +356,10 @@ async def batch_convert_sse(data: dict = Body(...)):
             )
             event_queue.put(summary)
         except Exception as exc:
+            logger.exception(f"Unhandled error in /batch-convert: {exc}")
             event_queue.put({"status": "failed", "error": str(exc)})
         finally:
-            event_queue.put(None)  # sentinel — terminates the SSE stream
+            event_queue.put(None)
 
     threading.Thread(target=_run_batch, daemon=True, name="batch-convert-sse").start()
 
@@ -353,23 +373,16 @@ async def batch_convert_sse(data: dict = Body(...)):
     return StreamingResponse(
         _stream_events(),
         media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-        },
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
     )
+
 
 # ---------------------------------------------------------------------------
 # Cloud mode — protection check
 # ---------------------------------------------------------------------------
 
-
 @app.post("/check-protection")
 async def check_protection(file: UploadFile = File(...)):
-    """
-    Return whether an uploaded .docx is DLP/IRM-protected.
-    A valid OOXML file is a ZIP archive; protected files are not.
-    """
     raw = await file.read()
     protected = not zipfile.is_zipfile(io.BytesIO(raw))
     return {"filename": file.filename, "protected": protected}
@@ -379,41 +392,54 @@ async def check_protection(file: UploadFile = File(...)):
 # Cloud mode — auth endpoints
 # ---------------------------------------------------------------------------
 
-
 @app.get("/auth/status")
 def auth_status():
-    """Return current authentication state (reads the Azure CLI cache)."""
     client = GraphAuthClient()
-    return {
-        "authenticated": client.is_authenticated(),
-        "account": client.get_account(),
-    }
+    authenticated = client.is_authenticated()
+    account = client.get_account()
+    logger.info(f"[AUTH] status check | authenticated={authenticated} | account={account}")
+    return {"authenticated": authenticated, "account": account}
 
 
 @app.post("/auth/login")
 async def auth_login():
-    """Run `az login` in a thread so FastAPI stays responsive during browser auth."""
+    logger.info("[AUTH] login triggered")
+
     def run_login():
         cmd = shutil.which("az") or shutil.which("az.cmd")
         if not cmd:
+            logger.error("[AUTH] login failed | error=az CLI not found in PATH")
             return False
+        logger.debug(f"subprocess: {cmd} login")
         result = subprocess.run([cmd, "login"], capture_output=True, text=True)
+        logger.debug(f"returncode: {result.returncode}")
+        if result.stdout:
+            logger.debug(f"stdout: {result.stdout.strip()}")
+        if result.stderr:
+            logger.warning(f"stderr: {result.stderr.strip()}")
         return result.returncode == 0
 
     success = await asyncio.to_thread(run_login)
     if not success:
+        logger.error("[AUTH] login failed | error=non-zero returncode or cancelled")
         raise HTTPException(status_code=401, detail="Login failed or was cancelled.")
 
     client = GraphAuthClient()
-    return {"authenticated": True, "account": client.get_account()}
+    account = client.get_account()
+    logger.info(f"[AUTH] login success | account={account}")
+    return {"authenticated": True, "account": account}
 
 
 @app.post("/auth/logout")
 async def auth_logout():
-    """Run `az logout` to clear the CLI session."""
     cmd = shutil.which("az") or shutil.which("az.cmd")
     if cmd:
-        subprocess.run([cmd, "logout"], capture_output=True)
+        logger.debug(f"subprocess: {cmd} logout")
+        result = subprocess.run([cmd, "logout"], capture_output=True, text=True)
+        logger.debug(f"returncode: {result.returncode}")
+        if result.stderr:
+            logger.warning(f"stderr: {result.stderr.strip()}")
+    logger.info("[AUTH] logged out")
     return {"authenticated": False, "account": None}
 
 
@@ -421,19 +447,8 @@ async def auth_logout():
 # Cloud mode — single file convert
 # ---------------------------------------------------------------------------
 
-
 @app.post("/cloud/convert")
 async def cloud_convert(data: dict = Body(...)):
-    """
-    Convert a single SharePoint/OneDrive .docx to Markdown.
-
-    Body:
-      {
-        "source_url": "https://tenant.sharepoint.com/sites/...",
-        "dest_sharepoint_url": "https://..." | null,
-        "local_output_dir": "/path/..." | null
-      }
-    """
     source_url = (data or {}).get("source_url", "").strip()
     dest_sp_url = (data or {}).get("dest_sharepoint_url") or None
     local_dir = (data or {}).get("local_output_dir") or None
@@ -441,10 +456,7 @@ async def cloud_convert(data: dict = Body(...)):
     if not source_url:
         raise HTTPException(status_code=400, detail="source_url is required.")
     if not dest_sp_url and not local_dir:
-        raise HTTPException(
-            status_code=400,
-            detail="Supply at least one of dest_sharepoint_url or local_output_dir."
-        )
+        raise HTTPException(status_code=400, detail="Supply at least one of dest_sharepoint_url or local_output_dir.")
 
     try:
         client = get_auth_client()
@@ -479,10 +491,13 @@ async def cloud_convert(data: dict = Body(...)):
         )
         return result
     except PermissionError as exc:
+        logger.error(f"[CONVERT] fail  | file={source_url} | mode=cloud | error={exc}")
         raise HTTPException(status_code=403, detail=str(exc))
     except FileNotFoundError as exc:
+        logger.error(f"[CONVERT] fail  | file={source_url} | mode=cloud | error={exc}")
         raise HTTPException(status_code=404, detail=str(exc))
     except Exception as exc:
+        logger.exception(f"Unhandled error in /cloud/convert: {exc}")
         raise HTTPException(status_code=500, detail=str(exc))
 
 
@@ -490,25 +505,8 @@ async def cloud_convert(data: dict = Body(...)):
 # Cloud mode — batch convert (SSE)
 # ---------------------------------------------------------------------------
 
-
 @app.post("/cloud/batch-convert")
 async def cloud_batch_convert(data: dict = Body(...)):
-    """
-    Batch-convert all .docx files in a SharePoint/OneDrive folder.
-
-    Body:
-      {
-        "source_folder_url": "https://...",
-        "dest_sharepoint_url": "https://..." | null,
-        "local_output_dir": "/path/..." | null,
-        "max_workers": 4
-      }
-
-    Streams SSE events:
-      {"type": "start", "total": N}
-      {"type": "file", "file": name, "status": "success"|"failed", ...}
-      {"type": "summary", "succeeded": [...], "failed": {...}}
-    """
     source_folder_url = (data or {}).get("source_folder_url", "").strip()
     dest_sp_url = (data or {}).get("dest_sharepoint_url") or None
     local_dir = (data or {}).get("local_output_dir") or None
@@ -517,10 +515,7 @@ async def cloud_batch_convert(data: dict = Body(...)):
     if not source_folder_url:
         raise HTTPException(status_code=400, detail="source_folder_url is required.")
     if not dest_sp_url and not local_dir:
-        raise HTTPException(
-            status_code=400,
-            detail="Supply at least one of dest_sharepoint_url or local_output_dir."
-        )
+        raise HTTPException(status_code=400, detail="Supply at least one of dest_sharepoint_url or local_output_dir.")
     if max_workers < 1:
         raise HTTPException(status_code=400, detail="max_workers must be >= 1.")
 
@@ -530,9 +525,16 @@ async def cloud_batch_convert(data: dict = Body(...)):
     except RuntimeError as exc:
         raise HTTPException(status_code=401, detail=str(exc))
 
+    logger.info(f"[CONVERT] start | mode=batch-cloud | source={source_folder_url} | workers={max_workers}")
+
     event_queue: "queue.Queue[dict | None]" = queue.Queue()
 
     def _emit(event: dict) -> None:
+        if event.get("type") == "file":
+            if event.get("status") == "success":
+                logger.info(f"[CONVERT] done  | file={event.get('file')} | elapsed={event.get('elapsed_ms')}ms | mode=cloud")
+            else:
+                logger.error(f"[CONVERT] fail  | file={event.get('file')} | error={event.get('error')} | mode=cloud")
         event_queue.put(event)
 
     def _run() -> None:
@@ -546,6 +548,7 @@ async def cloud_batch_convert(data: dict = Body(...)):
                 progress_callback=_emit,
             )
         except Exception as exc:
+            logger.exception(f"Unhandled error in /cloud/batch-convert: {exc}")
             event_queue.put({"type": "error", "message": str(exc)})
         finally:
             event_queue.put(None)
@@ -564,6 +567,30 @@ async def cloud_batch_convert(data: dict = Body(...)):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
     )
+
+
+# ---------------------------------------------------------------------------
+# Log viewer endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/logs/latest")
+def logs_latest(lines: int = 100):
+    lines = min(max(lines, 1), 500)
+    log_path = LOGS_DIR / "app.log"
+    if not log_path.exists():
+        return {"lines": []}
+    with open(log_path, encoding="utf-8", errors="replace") as f:
+        all_lines = f.readlines()
+    return {"lines": [ln.rstrip("\n") for ln in all_lines[-lines:]]}
+
+
+@app.delete("/logs/latest")
+def logs_clear():
+    log_path = LOGS_DIR / "app.log"
+    if log_path.exists():
+        open(log_path, "w").close()
+    logger.info("[LOGS] Log file cleared by user")
+    return {"status": "cleared"}
 
 
 if __name__ == "__main__":

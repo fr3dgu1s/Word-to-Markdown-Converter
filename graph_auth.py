@@ -10,19 +10,26 @@ Prerequisites:
 """
 
 import json
+import logging
 import subprocess
 from typing import Optional
+
+logger = logging.getLogger("wordtomd.auth")
 
 
 class GraphAuthClient:
 
     def get_token(self) -> str:
+        logger.debug("subprocess: az account get-access-token --resource https://graph.microsoft.com")
         result = subprocess.run(
             ["az", "account", "get-access-token",
              "--resource", "https://graph.microsoft.com"],
             capture_output=True,
             text=True,
         )
+        logger.debug(f"returncode: {result.returncode}")
+        if result.stderr:
+            logger.warning(f"stderr: {result.stderr.strip()}")
         if result.returncode != 0:
             raise RuntimeError(
                 "Azure CLI token acquisition failed. "
@@ -32,11 +39,13 @@ class GraphAuthClient:
         return data["accessToken"]
 
     def get_account(self) -> Optional[str]:
+        logger.debug("subprocess: az account show")
         result = subprocess.run(
             ["az", "account", "show"],
             capture_output=True,
             text=True,
         )
+        logger.debug(f"returncode: {result.returncode}")
         if result.returncode != 0:
             return None
         data = json.loads(result.stdout)

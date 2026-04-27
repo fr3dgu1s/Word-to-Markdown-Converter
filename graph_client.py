@@ -5,7 +5,9 @@ All functions take an explicit `token` string (Bearer) so they are stateless
 and can be called from any thread without sharing auth state.
 """
 
+import logging
 import re
+import time
 import urllib.parse
 from typing import Optional
 from urllib.parse import urlparse
@@ -13,6 +15,7 @@ from urllib.parse import urlparse
 import requests
 
 GRAPH_BASE = "https://graph.microsoft.com/v1.0"
+logger = logging.getLogger("wordtomd.graph")
 
 
 # ---------------------------------------------------------------------------
@@ -25,37 +28,54 @@ def _headers(token: str) -> dict:
 
 
 def _get(url: str, token: str, **kwargs) -> dict:
+    logger.debug(f"[GRAPH] GET {url}")
+    t0 = time.perf_counter()
     r = requests.get(url, headers=_headers(token), timeout=60, **kwargs)
+    elapsed = int((time.perf_counter() - t0) * 1000)
+    logger.debug(f"[GRAPH] response {r.status_code} ({elapsed}ms)")
     _raise_for_status(r)
     return r.json()
 
 
 def _put(url: str, token: str, data: bytes, content_type: str = "application/octet-stream") -> dict:
+    logger.debug(f"[GRAPH] PUT {url}")
+    t0 = time.perf_counter()
     headers = _headers(token)
     headers["Content-Type"] = content_type
     r = requests.put(url, headers=headers, data=data, timeout=120)
+    elapsed = int((time.perf_counter() - t0) * 1000)
+    logger.debug(f"[GRAPH] response {r.status_code} ({elapsed}ms)")
     _raise_for_status(r)
     return r.json()
 
 
 def _post(url: str, token: str, json_body: dict) -> dict:
+    logger.debug(f"[GRAPH] POST {url}")
+    t0 = time.perf_counter()
     headers = _headers(token)
     headers["Content-Type"] = "application/json"
     r = requests.post(url, headers=headers, json=json_body, timeout=60)
+    elapsed = int((time.perf_counter() - t0) * 1000)
+    logger.debug(f"[GRAPH] response {r.status_code} ({elapsed}ms)")
     _raise_for_status(r)
     return r.json()
 
 
 def _raise_for_status(r: requests.Response) -> None:
     if r.status_code == 401:
+        logger.error(f"[GRAPH] failed 401 | {r.url}")
         raise PermissionError("Graph API returned 401 Unauthorized. Token may be expired — sign in again.")
     if r.status_code == 403:
+        logger.error(f"[GRAPH] failed 403 | {r.url}")
         raise PermissionError(
             f"Graph API returned 403 Forbidden for {r.url}. "
             "Your account may lack the required permissions."
         )
     if r.status_code == 404:
+        logger.error(f"[GRAPH] failed 404 | {r.url}")
         raise FileNotFoundError(f"Graph API returned 404 Not Found for {r.url}.")
+    if not r.ok:
+        logger.error(f"[GRAPH] failed {r.status_code} | {r.url} | {r.text[:300]}")
     r.raise_for_status()
 
 

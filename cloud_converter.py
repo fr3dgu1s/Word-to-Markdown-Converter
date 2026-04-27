@@ -8,6 +8,7 @@ All functions are stateless with respect to auth — callers pass the token.
 """
 
 import io
+import logging
 import shutil
 import tempfile
 import threading
@@ -15,6 +16,8 @@ import time
 import zipfile
 from pathlib import Path
 from typing import Callable, Optional
+
+logger = logging.getLogger("wordtomd.converter")
 
 from graph_client import (
     download_file_bytes,
@@ -95,10 +98,12 @@ def convert_cloud_file(
         raise ValueError("Supply at least one of dest_folder_id or local_output_dir.")
 
     t0 = time.perf_counter()
+    logger.info(f"[CONVERT] start | file={filename} | mode=cloud")
     file_bytes = download_file_bytes(drive_id, item_id, token)
     protected = is_protected(file_bytes)
 
     if protected:
+        logger.error(f"[CONVERT] fail  | file={filename} | mode=cloud | error=DLP/IRM protected")
         raise RuntimeError(
             f"{filename} appears to be DLP/IRM-protected and cannot be converted "
             "without a local Word session. Use the Batch (Local) mode instead."
@@ -121,6 +126,7 @@ def convert_cloud_file(
         local_path = str(out)
 
     elapsed_ms = int((time.perf_counter() - t0) * 1000)
+    logger.info(f"[CONVERT] done  | file={filename} | elapsed={elapsed_ms}ms | mode=cloud")
     return {
         "filename": filename,
         "protected": protected,
