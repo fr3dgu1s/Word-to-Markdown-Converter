@@ -50,6 +50,8 @@ C:\Users\fresantos\Repos\Word-to-Markdown-Converter\MipHelper\bin\Release\net8.0
 C:\Users\fresantos\Repos\Word-to-Markdown-Converter\MipHelper\bin\Release\net8.0\win-x64\publish\MipHelper.runtimeconfig.json
 C:\Users\fresantos\Repos\Word-to-Markdown-Converter\MipHelper\bin\Release\net8.0\win-x64\publish\MipHelper.pdb
 C:\Users\fresantos\Repos\Word-to-Markdown-Converter\MipHelper\bin\Release\net8.0\win-x64\publish\Microsoft.Identity.Client.dll
+C:\Users\fresantos\Repos\Word-to-Markdown-Converter\MipHelper\bin\Release\net8.0\win-x64\publish\Microsoft.Identity.Client.Broker.dll
+C:\Users\fresantos\Repos\Word-to-Markdown-Converter\MipHelper\bin\Release\net8.0\win-x64\publish\Microsoft.Identity.Client.NativeInterop.dll
 C:\Users\fresantos\Repos\Word-to-Markdown-Converter\MipHelper\bin\Release\net8.0\win-x64\publish\Microsoft.IdentityModel.Abstractions.dll
 C:\Users\fresantos\Repos\Word-to-Markdown-Converter\MipHelper\bin\Release\net8.0\win-x64\publish\Microsoft.InformationProtection.dll
 C:\Users\fresantos\Repos\Word-to-Markdown-Converter\MipHelper\bin\Release\net8.0\win-x64\publish\System.CommandLine.dll
@@ -66,3 +68,4 @@ C:\Users\fresantos\Repos\Word-to-Markdown-Converter\MipHelper\bin\Release\net8.0
 C:\Users\fresantos\Repos\Word-to-Markdown-Converter\MipHelper\bin\Release\net8.0\win-x64\publish\tr\System.CommandLine.resources.dll
 C:\Users\fresantos\Repos\Word-to-Markdown-Converter\MipHelper\bin\Release\net8.0\win-x64\publish\zh-Hans\System.CommandLine.resources.dll
 C:\Users\fresantos\Repos\Word-to-Markdown-Converter\MipHelper\bin\Release\net8.0\win-x64\publish\zh-Hant\System.CommandLine.resources.dll
+C:\Users\fresantos\Repos\Word-to-Markdown-Converter\MipHelper\bin\Release\net8.0\win-x64\publish\msalruntime.dll

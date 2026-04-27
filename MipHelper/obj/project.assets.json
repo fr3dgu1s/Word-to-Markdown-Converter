@@ -19,6 +19,46 @@
           }
         }
       },
+      "Microsoft.Identity.Client.Broker/4.66.2": {
+        "type": "package",
+        "dependencies": {
+          "Microsoft.Identity.Client": "4.66.2",
+          "Microsoft.Identity.Client.NativeInterop": "0.16.2"
+        },
+        "compile": {
+          "lib/netstandard2.0/Microsoft.Identity.Client.Broker.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/netstandard2.0/Microsoft.Identity.Client.Broker.dll": {
+            "related": ".xml"
+          }
+        }
+      },
+      "Microsoft.Identity.Client.NativeInterop/0.16.2": {
+        "type": "package",
+        "compile": {
+          "lib/netstandard2.0/Microsoft.Identity.Client.NativeInterop.dll": {}
+        },
+        "runtime": {
+          "lib/netstandard2.0/Microsoft.Identity.Client.NativeInterop.dll": {}
+        },
+        "runtimeTargets": {
+          "runtimes/win-arm64/native/msalruntime_arm64.dll": {
+            "assetType": "native",
+            "rid": "win-arm64"
+          },
+          "runtimes/win-x64/native/msalruntime.dll": {
+            "assetType": "native",
+            "rid": "win-x64"
+          },
+          "runtimes/win-x86/native/msalruntime_x86.dll": {
+            "assetType": "native",
+            "rid": "win-x86"
+          }
+        }
+      },
       "Microsoft.IdentityModel.Abstractions/6.35.0": {
         "type": "package",
         "compile": {
@@ -170,6 +210,35 @@
           "lib/net6.0/Microsoft.Identity.Client.dll": {
             "related": ".xml"
           }
+        }
+      },
+      "Microsoft.Identity.Client.Broker/4.66.2": {
+        "type": "package",
+        "dependencies": {
+          "Microsoft.Identity.Client": "4.66.2",
+          "Microsoft.Identity.Client.NativeInterop": "0.16.2"
+        },
+        "compile": {
+          "lib/netstandard2.0/Microsoft.Identity.Client.Broker.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/netstandard2.0/Microsoft.Identity.Client.Broker.dll": {
+            "related": ".xml"
+          }
+        }
+      },
+      "Microsoft.Identity.Client.NativeInterop/0.16.2": {
+        "type": "package",
+        "compile": {
+          "lib/netstandard2.0/Microsoft.Identity.Client.NativeInterop.dll": {}
+        },
+        "runtime": {
+          "lib/netstandard2.0/Microsoft.Identity.Client.NativeInterop.dll": {}
+        },
+        "native": {
+          "runtimes/win-x64/native/msalruntime.dll": {}
         }
       },
       "Microsoft.IdentityModel.Abstractions/6.35.0": {
@@ -331,6 +400,39 @@
         "lib/netstandard2.0/Microsoft.Identity.Client.xml",
         "microsoft.identity.client.4.66.2.nupkg.sha512",
         "microsoft.identity.client.nuspec"
+      ]
+    },
+    "Microsoft.Identity.Client.Broker/4.66.2": {
+      "sha512": "KpvVCdtujXafUCh2tYUNEcRrrU93+og8KTCjC+gKuSlIFwp0emdvDTXm/hqYUxO+wsdJdaqlaFvUeWzmhYt56A==",
+      "type": "package",
+      "path": "microsoft.identity.client.broker/4.66.2",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "lib/net462/Microsoft.Identity.Client.Broker.dll",
+        "lib/net462/Microsoft.Identity.Client.Broker.xml",
+        "lib/netstandard2.0/Microsoft.Identity.Client.Broker.dll",
+        "lib/netstandard2.0/Microsoft.Identity.Client.Broker.xml",
+        "microsoft.identity.client.broker.4.66.2.nupkg.sha512",
+        "microsoft.identity.client.broker.nuspec"
+      ]
+    },
+    "Microsoft.Identity.Client.NativeInterop/0.16.2": {
+      "sha512": "hBPb/EjS3PNN+5B3a3PzVHBGb/RWRKY+q+Ib0D40NtdiZekkIApdOcjuJa31h5gVQGuyEkBIi6/PiG1ioqncjQ==",
+      "type": "package",
+      "path": "microsoft.identity.client.nativeinterop/0.16.2",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "build/net461/Microsoft.Identity.Client.NativeInterop.props",
+        "buildtransitive/net461/Microsoft.Identity.Client.NativeInterop.targets",
+        "lib/net461/Microsoft.Identity.Client.NativeInterop.dll",
+        "lib/netstandard2.0/Microsoft.Identity.Client.NativeInterop.dll",
+        "microsoft.identity.client.nativeinterop.0.16.2.nupkg.sha512",
+        "microsoft.identity.client.nativeinterop.nuspec",
+        "runtimes/win-arm64/native/msalruntime_arm64.dll",
+        "runtimes/win-x64/native/msalruntime.dll",
+        "runtimes/win-x86/native/msalruntime_x86.dll"
       ]
     },
     "Microsoft.IdentityModel.Abstractions/6.35.0": {
@@ -869,6 +971,7 @@
   "projectFileDependencyGroups": {
     "net8.0": [
       "Microsoft.Identity.Client >= 4.66.2",
+      "Microsoft.Identity.Client.Broker >= 4.66.2",
       "Microsoft.InformationProtection.File >= 1.16.137",
       "System.CommandLine >= 2.0.0-beta4.22272.1",
       "System.Text.Json >= 8.0.5"
@@ -918,6 +1021,10 @@
         "targetAlias": "net8.0",
         "dependencies": {
           "Microsoft.Identity.Client": {
+            "target": "Package",
+            "version": "[4.66.2, )"
+          },
+          "Microsoft.Identity.Client.Broker": {
             "target": "Package",
             "version": "[4.66.2, )"
           },

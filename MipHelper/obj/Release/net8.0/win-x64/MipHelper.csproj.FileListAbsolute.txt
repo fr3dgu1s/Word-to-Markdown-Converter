@@ -78,3 +78,6 @@ C:\Users\fresantos\Repos\Word-to-Markdown-Converter\MipHelper\obj\Release\net8.0
 C:\Users\fresantos\Repos\Word-to-Markdown-Converter\MipHelper\obj\Release\net8.0\win-x64\MipHelper.pdb
 C:\Users\fresantos\Repos\Word-to-Markdown-Converter\MipHelper\obj\Release\net8.0\win-x64\MipHelper.genruntimeconfig.cache
 C:\Users\fresantos\Repos\Word-to-Markdown-Converter\MipHelper\obj\Release\net8.0\win-x64\ref\MipHelper.dll
+C:\Users\fresantos\Repos\Word-to-Markdown-Converter\MipHelper\bin\Release\net8.0\win-x64\Microsoft.Identity.Client.Broker.dll
+C:\Users\fresantos\Repos\Word-to-Markdown-Converter\MipHelper\bin\Release\net8.0\win-x64\Microsoft.Identity.Client.NativeInterop.dll
+C:\Users\fresantos\Repos\Word-to-Markdown-Converter\MipHelper\bin\Release\net8.0\win-x64\msalruntime.dll

@@ -2,7 +2,11 @@ using System;
 using System.CommandLine;
 using System.IO;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.InformationProtection;
+using Microsoft.InformationProtection.File;
+using Microsoft.InformationProtection.Exceptions;
 
 namespace WordToMd.MipHelper;
 
@@ -190,26 +194,124 @@ public static class Program
     // fetch-unprotect (Graph 403 fallback path)
     // -----------------------------------------------------------------------
 
-    private static Task<int> RunFetchUnprotect(string url, FileInfo output, string? user)
+    private static async Task<int> RunFetchUnprotect(string url, FileInfo output, string? user)
     {
-        // TODO (MIP SDK):
-        //   1) Acquire a delegated token for the user via MSAL public client
-        //      (interactive or device-code) bound to the user's tenant.
-        //   2) Use the SharePoint/OneDrive REST path that the Office desktop
-        //      apps use: open the protected file stream with user creds and
-        //      call IFileHandler.RemoveProtectionAsync() to materialise a
-        //      decrypted copy at 'output'.
-        //   3) Return:
-        //        0  on success
-        //       20  when Purview denies access (UnauthorizedAccessException)
-        //       99  for any other failure
-        Console.Error.WriteLine(
-            "fetch-unprotect requires the MIP SDK plus an approved app registration. " +
-            "Complete onboarding at https://aka.ms/mipsdkapponboarding and replace this stub.");
-        Console.Error.WriteLine($"requested url: {url}");
-        Console.Error.WriteLine($"requested output: {output.FullName}");
-        Console.Error.WriteLine($"user: {user ?? "<none>"}");
-        return Task.FromResult(99);
+        // Pipeline:
+        //   1. Build MSAL public client from MIP_CLIENT_ID / MIP_TENANT_ID /
+        //      MIP_REDIRECT_URI (cache -> IWA -> interactive).
+        //   2. Acquire Graph token (Files.Read.All, Sites.Read.All) and
+        //      download the file via /shares/{id}/driveItem -> /content.
+        //   3. Initialise the MIP File SDK with an MSAL-backed auth delegate
+        //      and call RemoveProtectionAsync on the encrypted .docx.
+        //   4. CommitAsync the decrypted bytes to <output>.
+        //
+        // Exit codes: 0 success, 20 access denied, 99 generic failure.
+
+        string? scratchDir = null;
+        MipContext? mipContext = null;
+        IFileProfile? profile = null;
+        try
+        {
+            var clientApp = MipAuth.BuildClient();
+            using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(3));
+
+            // 1) Graph token + download.
+            Console.Error.WriteLine("[mip] acquiring Graph token...");
+            var graphToken = await MipAuth.AcquireTokenAsync(
+                clientApp, MipAuth.GraphScopes, user, cts.Token).ConfigureAwait(false);
+
+            scratchDir = Path.Combine(Path.GetTempPath(),
+                "mip-fetch-" + Guid.NewGuid().ToString("N").Substring(0, 8));
+            Directory.CreateDirectory(scratchDir);
+            var encryptedPath = Path.Combine(scratchDir, "source.docx");
+
+            Console.Error.WriteLine("[mip] downloading via Graph /shares/driveItem...");
+            await GraphDownloader.DownloadByUrlAsync(
+                graphToken, url, encryptedPath, cts.Token).ConfigureAwait(false);
+
+            // 2) MIP File SDK init.
+            Console.Error.WriteLine("[mip] initialising MIP File SDK...");
+            var clientId = Environment.GetEnvironmentVariable("MIP_CLIENT_ID")?.Trim() ?? "";
+            var appInfo = new ApplicationInfo
+            {
+                ApplicationId = clientId,
+                ApplicationName = "Word-to-Markdown Converter",
+                ApplicationVersion = "1.0.0",
+            };
+
+            var mipDataDir = Path.Combine(scratchDir, "mip_data");
+            Directory.CreateDirectory(mipDataDir);
+
+            MIP.Initialize(MipComponent.File);
+            mipContext = MIP.CreateMipContext(
+                appInfo,
+                mipDataDir,
+                LogLevel.Info,
+                null,
+                null);
+
+            var profileSettings = new FileProfileSettings(
+                mipContext,
+                CacheStorageType.OnDiskEncrypted,
+                new MipConsentDelegate());
+            profile = await MIP.LoadFileProfileAsync(profileSettings).ConfigureAwait(false);
+
+            var identityValue = !string.IsNullOrWhiteSpace(user) ? user : "user@local";
+            var engineSettings = new FileEngineSettings(
+                identityValue!,
+                new MipAuthDelegate(clientApp, user),
+                clientData: "",
+                locale: "en-US")
+            {
+                Identity = new Identity(identityValue!),
+            };
+            var engine = await profile.AddEngineAsync(engineSettings).ConfigureAwait(false);
+
+            // 3) Open + remove protection.
+            Console.Error.WriteLine("[mip] opening encrypted file handler...");
+            var handler = await engine
+                .CreateFileHandlerAsync(encryptedPath, encryptedPath, true, null)
+                .ConfigureAwait(false);
+
+            handler.RemoveProtection();
+
+            // 4) Commit decrypted output.
+            Directory.CreateDirectory(output.Directory!.FullName);
+            var committed = await handler.CommitAsync(output.FullName).ConfigureAwait(false);
+            if (!committed)
+            {
+                Console.Error.WriteLine("[mip] CommitAsync returned false; nothing was written.");
+                return 99;
+            }
+
+            Console.Error.WriteLine($"[mip] decrypted copy written to {output.FullName}");
+            return 0;
+        }
+        catch (AccessDeniedException ade)
+        {
+            Console.Error.WriteLine($"access denied: {ade.Message}");
+            return 20;
+        }
+        catch (UnauthorizedAccessException uae)
+        {
+            Console.Error.WriteLine($"access denied: {uae.Message}");
+            return 20;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"fetch-unprotect failed: {ex}");
+            return 99;
+        }
+        finally
+        {
+            try { profile = null; } catch { /* ignore */ }
+            try { mipContext?.ShutDown(); } catch { /* ignore */ }
+            try { mipContext?.Dispose(); } catch { /* ignore */ }
+            if (scratchDir != null && Directory.Exists(scratchDir))
+            {
+                try { Directory.Delete(scratchDir, recursive: true); } catch { /* ignore */ }
+            }
+        }
     }
 
     // -----------------------------------------------------------------------

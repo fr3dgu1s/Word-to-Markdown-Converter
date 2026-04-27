@@ -1,10 +1,12 @@
 {
   "version": 2,
-  "dgSpecHash": "q9V9U/je/3s=",
+  "dgSpecHash": "Wu1XoJuihuU=",
   "success": true,
   "projectFilePath": "C:\\Users\\fresantos\\Repos\\Word-to-Markdown-Converter\\MipHelper\\MipHelper.csproj",
   "expectedPackageFiles": [
     "C:\\Users\\fresantos\\.nuget\\packages\\microsoft.identity.client\\4.66.2\\microsoft.identity.client.4.66.2.nupkg.sha512",
+    "C:\\Users\\fresantos\\.nuget\\packages\\microsoft.identity.client.broker\\4.66.2\\microsoft.identity.client.broker.4.66.2.nupkg.sha512",
+    "C:\\Users\\fresantos\\.nuget\\packages\\microsoft.identity.client.nativeinterop\\0.16.2\\microsoft.identity.client.nativeinterop.0.16.2.nupkg.sha512",
     "C:\\Users\\fresantos\\.nuget\\packages\\microsoft.identitymodel.abstractions\\6.35.0\\microsoft.identitymodel.abstractions.6.35.0.nupkg.sha512",
     "C:\\Users\\fresantos\\.nuget\\packages\\microsoft.informationprotection.file\\1.16.149\\microsoft.informationprotection.file.1.16.149.nupkg.sha512",
     "C:\\Users\\fresantos\\.nuget\\packages\\system.commandline\\2.0.0-beta4.22272.1\\system.commandline.2.0.0-beta4.22272.1.nupkg.sha512",

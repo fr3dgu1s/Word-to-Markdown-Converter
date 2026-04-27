@@ -48,6 +48,10 @@
               "target": "Package",
               "version": "[4.66.2, )"
             },
+            "Microsoft.Identity.Client.Broker": {
+              "target": "Package",
+              "version": "[4.66.2, )"
+            },
             "Microsoft.InformationProtection.File": {
               "target": "Package",
               "version": "[1.16.137, )"
