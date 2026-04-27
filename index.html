@@ -31,6 +31,9 @@
             --radius-md: 10px;
             --radius-lg: 16px;
             --shadow-card: 0 2px 8px rgba(0,0,0,0.07);
+            --color-text-success:   #16a34a;
+            --color-text-secondary: #4a5568;
+            --color-text-danger:    #dc2626;
         }
 
         @media (prefers-color-scheme: dark) {
@@ -50,6 +53,9 @@
                 --color-warn-border: #78350f;
                 --color-warn-text:   #fbbf24;
                 --shadow-card: 0 2px 8px rgba(0,0,0,0.4);
+                --color-text-success:   #22c55e;
+                --color-text-secondary: #a0aec0;
+                --color-text-danger:    #ef4444;
             }
         }
 
@@ -254,19 +260,23 @@
         /* ── Cloud panel ─────────────────────────────────────────────────────── */
         .cloud-panel { display: flex; flex-direction: column; gap: 1rem; }
 
-        /* Auth strip */
-        .auth-strip {
-            display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;
-            padding: 0.75rem 1rem; border-radius: var(--radius-sm);
+        /* Auth row */
+        .auth-row {
+            display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;
+            padding: 0.65rem 1rem; border-radius: var(--radius-sm);
             border: 1px solid var(--color-border); background: var(--color-surface-alt);
+            font-size: 0.88rem; min-height: 40px;
         }
-        .auth-indicator { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
-        .auth-indicator.signed-in  { background: var(--color-success); }
-        .auth-indicator.warn       { background: #f59e0b; }
-        .auth-indicator.checking   { background: #f59e0b; animation: pulse 1s ease infinite; }
+        .auth-row button {
+            padding: 0.28rem 0.75rem; border-radius: var(--radius-sm); font-size: 0.82rem;
+            font-weight: 600; cursor: pointer; border: 1px solid var(--color-border);
+            background: var(--color-surface); color: var(--color-text);
+        }
+        .auth-row button:hover { border-color: var(--color-primary); color: var(--color-primary); }
+        .dot     { width: 9px; height: 9px; border-radius: 50%; background: var(--color-text-success); display: inline-block; flex-shrink: 0; }
+        .dot-off { width: 9px; height: 9px; border-radius: 50%; background: #f59e0b;                   display: inline-block; flex-shrink: 0; }
         @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
-        .auth-label { font-size: 0.88rem; color: var(--color-text); flex: 1; }
-        .auth-account { font-size: 0.82rem; color: var(--color-text-muted); font-family: monospace; }
+        .dot-spin { width: 9px; height: 9px; border-radius: 50%; border: 2px solid #f59e0b; border-top-color: transparent; display: inline-block; flex-shrink: 0; animation: spin 0.8s linear infinite; }
 
         /* Field rows */
         .field-row { display: flex; flex-direction: column; gap: 0.3rem; }
@@ -413,11 +423,10 @@
     <!-- ══════════════════════════════════════════════════════════════════════ -->
     <div id="cloud-panel" class="hidden cloud-panel">
 
-        <!-- Auth strip -->
-        <div class="auth-strip">
-            <span class="auth-indicator checking" id="auth-indicator"></span>
-            <span class="auth-label" id="auth-label">Checking authentication…</span>
-            <span class="auth-account" id="auth-account"></span>
+        <!-- Auth row -->
+        <div class="auth-row" id="auth-row">
+            <span class="dot-spin"></span>
+            <span style="color:var(--color-text-secondary)">Checking authentication…</span>
         </div>
 
         <!-- Source URL -->
@@ -492,7 +501,6 @@ function switchMode(mode) {
     document.getElementById('tab-cloud').classList.toggle('active',  isCloud);
     document.getElementById('local-panel').classList.toggle('hidden',  isCloud);
     document.getElementById('cloud-panel').classList.toggle('hidden', !isCloud);
-    if (isCloud && !_authInitialized) initCloudAuth();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -917,46 +925,60 @@ function resetApp() {
 // CLOUD PANEL
 // ═══════════════════════════════════════════════════════════════════════════
 
-let _authInitialized = false;
 let _cloudAuthed = false;
 
 // ── Auth ──────────────────────────────────────────────────────────────────
-function initCloudAuth() {
-    _authInitialized = true;
-    const ind   = document.getElementById('auth-indicator');
-    const label = document.getElementById('auth-label');
-
-    ind.className = 'auth-indicator checking';
-    label.textContent = 'Checking authentication…';
-
-    fetch('/auth/status')
-        .then(r => r.json())
-        .then(data => setAuthUI(data.authenticated, data.account))
-        .catch(() => {
-            ind.className = 'auth-indicator warn';
-            label.textContent = 'Could not reach server.';
-        });
-}
-
-function setAuthUI(authenticated, account) {
-    const ind   = document.getElementById('auth-indicator');
-    const label = document.getElementById('auth-label');
-    const acct  = document.getElementById('auth-account');
-
-    _cloudAuthed = authenticated;
-    if (authenticated) {
-        ind.className = 'auth-indicator signed-in';
-        label.textContent = 'Connected via Azure CLI';
-        acct.textContent  = account || '';
-    } else {
-        ind.className = 'auth-indicator warn';
-        label.textContent = 'Not connected — run az login in your terminal and restart the app';
-        acct.textContent  = '';
+async function checkAuth() {
+    try {
+        const data = await fetch('/auth/status').then(r => r.json());
+        renderAuthRow(data);
+    } catch {
+        document.getElementById('auth-row').innerHTML =
+            `<span class="dot-off"></span><span style="color:var(--color-text-secondary)">Could not reach server.</span>`;
     }
-
-    document.getElementById('btn-cloud-convert').disabled = !authenticated;
-    document.getElementById('btn-cloud-batch').disabled   = !authenticated;
 }
+
+function renderAuthRow(data) {
+    const el = document.getElementById('auth-row');
+    _cloudAuthed = data.authenticated;
+    if (data.authenticated) {
+        el.innerHTML = `
+            <span class="dot"></span>
+            <span style="color:var(--color-text-success);font-weight:600;">${data.account || 'Signed in'}</span>
+            <button onclick="logout()" style="margin-left:auto;">Sign out</button>`;
+    } else {
+        el.innerHTML = `
+            <span class="dot-off"></span>
+            <span style="color:var(--color-text-secondary)">Not connected</span>
+            <button onclick="login()" style="margin-left:8px;">Sign in with Microsoft →</button>`;
+    }
+    document.getElementById('btn-cloud-convert').disabled = !data.authenticated;
+    document.getElementById('btn-cloud-batch').disabled   = !data.authenticated;
+}
+
+async function login() {
+    const el = document.getElementById('auth-row');
+    el.innerHTML = `<span class="dot-spin"></span><span style="color:var(--color-text-secondary)">Signing in — check your browser…</span>`;
+    document.getElementById('btn-cloud-convert').disabled = true;
+    document.getElementById('btn-cloud-batch').disabled   = true;
+    try {
+        const data = await fetch('/auth/login', { method: 'POST' }).then(r => {
+            if (!r.ok) throw new Error('Login failed or was cancelled.');
+            return r.json();
+        });
+        renderAuthRow(data);
+    } catch (err) {
+        el.innerHTML = `<span class="dot-off"></span><span style="color:var(--color-text-danger)">${err.message} — </span><button onclick="login()" style="margin-left:4px;">Try again</button>`;
+    }
+}
+
+async function logout() {
+    await fetch('/auth/logout', { method: 'POST' });
+    checkAuth();
+}
+
+// Check auth state on page load
+checkAuth();
 
 // ── Destination toggles ───────────────────────────────────────────────────
 function toggleDestSP(on) {

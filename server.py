@@ -4,6 +4,7 @@ import json
 import os
 import queue
 import shutil
+import subprocess
 import tempfile
 import re
 import threading
@@ -387,6 +388,33 @@ def auth_status():
         "authenticated": client.is_authenticated(),
         "account": client.get_account(),
     }
+
+
+@app.post("/auth/login")
+async def auth_login():
+    """Run `az login` in a thread so FastAPI stays responsive during browser auth."""
+    def run_login():
+        cmd = shutil.which("az") or shutil.which("az.cmd")
+        if not cmd:
+            return False
+        result = subprocess.run([cmd, "login"], capture_output=True, text=True)
+        return result.returncode == 0
+
+    success = await asyncio.to_thread(run_login)
+    if not success:
+        raise HTTPException(status_code=401, detail="Login failed or was cancelled.")
+
+    client = GraphAuthClient()
+    return {"authenticated": True, "account": client.get_account()}
+
+
+@app.post("/auth/logout")
+async def auth_logout():
+    """Run `az logout` to clear the CLI session."""
+    cmd = shutil.which("az") or shutil.which("az.cmd")
+    if cmd:
+        subprocess.run([cmd, "logout"], capture_output=True)
+    return {"authenticated": False, "account": None}
 
 
 # ---------------------------------------------------------------------------
