@@ -23,7 +23,7 @@ from protected_file_access import (
     test_protected_file_access,
 )
 from word_dispatch_pipeline import batch_convert as word_dispatch_batch_convert
-from graph_auth import get_auth_client
+from graph_auth import get_auth_client, GraphAuthClient
 from cloud_converter import batch_convert_cloud
 
 app = FastAPI()
@@ -380,80 +380,13 @@ async def check_protection(file: UploadFile = File(...)):
 
 
 @app.get("/auth/status")
-async def auth_status():
-    """Return current authentication state."""
-    try:
-        client = get_auth_client()
-        authenticated = client.is_authenticated()
-        account = client.get_account() if authenticated else None
-        return {"authenticated": authenticated, "account": account}
-    except RuntimeError as exc:
-        # GRAPH_CLIENT_ID not set or msal not installed — cloud mode unavailable
-        return {"authenticated": False, "account": None, "error": str(exc)}
-
-
-@app.post("/auth/login")
-async def auth_login():
-    """
-    Initiate device-code flow and stream progress as SSE.
-
-    Events:
-      {"type": "code", "user_code": "...", "verification_uri": "..."}
-      {"type": "success", "account": "user@tenant.com"}
-      {"type": "error", "message": "..."}
-    """
-    try:
-        client = get_auth_client()
-    except RuntimeError as exc:
-        raise HTTPException(status_code=503, detail=str(exc))
-
-    try:
-        flow = client.start_device_code_flow()
-    except RuntimeError as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
-
-    event_queue: "queue.Queue[dict | None]" = queue.Queue()
-
-    def _poll() -> None:
-        try:
-            client.complete_device_code_flow(flow)
-            account = client.get_account()
-            event_queue.put({"type": "success", "account": account})
-        except RuntimeError as exc:
-            event_queue.put({"type": "error", "message": str(exc)})
-        finally:
-            event_queue.put(None)
-
-    event_queue.put({
-        "type": "code",
-        "user_code": flow["user_code"],
-        "verification_uri": flow["verification_uri"],
-    })
-    threading.Thread(target=_poll, daemon=True, name="auth-poll").start()
-
-    async def _stream():
-        while True:
-            item = await asyncio.to_thread(event_queue.get)
-            if item is None:
-                break
-            yield f"data: {json.dumps(item)}\n\n"
-
-    return StreamingResponse(
-        _stream(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
-    )
-
-
-@app.post("/auth/logout")
-async def auth_logout():
-    """Remove the cached account and wipe the token cache."""
-    try:
-        client = get_auth_client()
-        client.logout()
-        return {"status": "logged_out"}
-    except RuntimeError as exc:
-        raise HTTPException(status_code=503, detail=str(exc))
+def auth_status():
+    """Return current authentication state (reads the Azure CLI cache)."""
+    client = GraphAuthClient()
+    return {
+        "authenticated": client.is_authenticated(),
+        "account": client.get_account(),
+    }
 
 
 # ---------------------------------------------------------------------------

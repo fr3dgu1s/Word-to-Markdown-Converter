@@ -262,23 +262,11 @@
         }
         .auth-indicator { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
         .auth-indicator.signed-in  { background: var(--color-success); }
-        .auth-indicator.signed-out { background: var(--color-danger); }
+        .auth-indicator.warn       { background: #f59e0b; }
         .auth-indicator.checking   { background: #f59e0b; animation: pulse 1s ease infinite; }
         @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
         .auth-label { font-size: 0.88rem; color: var(--color-text); flex: 1; }
         .auth-account { font-size: 0.82rem; color: var(--color-text-muted); font-family: monospace; }
-        .auth-btn { padding: 0.38rem 0.8rem; border-radius: var(--radius-sm); font-size: 0.82rem; font-weight: 600; cursor: pointer; border: 1px solid var(--color-border); background: var(--color-surface); color: var(--color-text); }
-        .auth-btn:hover { border-color: var(--color-primary); color: var(--color-primary); }
-        .auth-btn.danger:hover { border-color: var(--color-danger); color: var(--color-danger); }
-
-        /* Device-code box */
-        .device-code-box {
-            padding: 1rem; border-radius: var(--radius-sm);
-            border: 1px solid var(--color-warn-border); background: var(--color-warn-bg);
-            color: var(--color-warn-text); font-size: 0.9rem;
-        }
-        .device-code-box .code { font-size: 1.5rem; font-weight: 800; font-family: monospace; letter-spacing: 0.1em; }
-        .device-code-box a { color: var(--color-primary); }
 
         /* Field rows */
         .field-row { display: flex; flex-direction: column; gap: 0.3rem; }
@@ -430,15 +418,6 @@
             <span class="auth-indicator checking" id="auth-indicator"></span>
             <span class="auth-label" id="auth-label">Checking authentication…</span>
             <span class="auth-account" id="auth-account"></span>
-            <button class="auth-btn" id="btn-sign-in"  onclick="startSignIn()"  style="display:none;">Sign in</button>
-            <button class="auth-btn danger" id="btn-sign-out" onclick="signOut()  " style="display:none;">Sign out</button>
-        </div>
-
-        <!-- Device code -->
-        <div class="device-code-box hidden" id="device-code-box">
-            <p style="margin:0 0 0.4rem;font-weight:600;">Open <a id="verify-uri" href="#" target="_blank" rel="noopener">this link</a> and enter the code:</p>
-            <div class="code" id="device-code-value"></div>
-            <p style="margin:0.5rem 0 0;font-size:0.8rem;color:var(--color-text-muted);">Waiting for you to sign in…</p>
         </div>
 
         <!-- Source URL -->
@@ -946,29 +925,15 @@ function initCloudAuth() {
     _authInitialized = true;
     const ind   = document.getElementById('auth-indicator');
     const label = document.getElementById('auth-label');
-    const acct  = document.getElementById('auth-account');
-    const btnIn  = document.getElementById('btn-sign-in');
-    const btnOut = document.getElementById('btn-sign-out');
 
     ind.className = 'auth-indicator checking';
     label.textContent = 'Checking authentication…';
 
     fetch('/auth/status')
         .then(r => r.json())
-        .then(data => {
-            if (data.error && !data.authenticated) {
-                ind.className = 'auth-indicator signed-out';
-                label.textContent = 'Cloud mode unavailable: ' + data.error;
-                return;
-            }
-            if (data.authenticated) {
-                setAuthUI(true, data.account);
-            } else {
-                setAuthUI(false, null);
-            }
-        })
+        .then(data => setAuthUI(data.authenticated, data.account))
         .catch(() => {
-            ind.className = 'auth-indicator signed-out';
+            ind.className = 'auth-indicator warn';
             label.textContent = 'Could not reach server.';
         });
 }
@@ -977,56 +942,20 @@ function setAuthUI(authenticated, account) {
     const ind   = document.getElementById('auth-indicator');
     const label = document.getElementById('auth-label');
     const acct  = document.getElementById('auth-account');
-    const btnIn  = document.getElementById('btn-sign-in');
-    const btnOut = document.getElementById('btn-sign-out');
 
     _cloudAuthed = authenticated;
     if (authenticated) {
         ind.className = 'auth-indicator signed-in';
-        label.textContent = 'Signed in';
+        label.textContent = 'Connected via Azure CLI';
         acct.textContent  = account || '';
-        btnIn.style.display  = 'none';
-        btnOut.style.display = '';
     } else {
-        ind.className = 'auth-indicator signed-out';
-        label.textContent = 'Not signed in';
+        ind.className = 'auth-indicator warn';
+        label.textContent = 'Not connected — run az login in your terminal and restart the app';
         acct.textContent  = '';
-        btnIn.style.display  = '';
-        btnOut.style.display = 'none';
     }
 
     document.getElementById('btn-cloud-convert').disabled = !authenticated;
     document.getElementById('btn-cloud-batch').disabled   = !authenticated;
-}
-
-function startSignIn() {
-    const codeBox = document.getElementById('device-code-box');
-    codeBox.classList.remove('hidden');
-    document.getElementById('device-code-value').textContent = '…';
-    document.getElementById('auth-label').textContent = 'Starting sign-in…';
-
-    fetchSSE('/auth/login', {}, event => {
-        const d = JSON.parse(event.data);
-        if (d.type === 'code') {
-            document.getElementById('device-code-value').textContent = d.user_code;
-            const uri = document.getElementById('verify-uri');
-            uri.href = d.verification_uri;
-            uri.textContent = d.verification_uri;
-            document.getElementById('auth-label').textContent = 'Follow the link and enter the code above';
-        } else if (d.type === 'success') {
-            codeBox.classList.add('hidden');
-            setAuthUI(true, d.account);
-        } else if (d.type === 'error') {
-            codeBox.classList.add('hidden');
-            document.getElementById('auth-label').textContent = 'Sign-in failed: ' + d.message;
-        }
-    });
-}
-
-function signOut() {
-    fetch('/auth/logout', { method: 'POST' })
-        .then(() => setAuthUI(false, null))
-        .catch(() => alert('Sign-out request failed.'));
 }
 
 // ── Destination toggles ───────────────────────────────────────────────────
