@@ -62,6 +62,45 @@ Override any of these by editing [.env](.env) (`APP_DATA_ROOT`,
 4. Switch to **Visual Preview** to render the Markdown with images.
 5. Click **Save** to update `C:/temp/W2MD/Outputs/<doc-name>.md`,
    or **Copy** to copy Markdown to the clipboard.
+
+### Editor commands
+
+The Markdown editor toolbar includes two helpers tailored for documents
+exported from Word:
+
+- **Insert Title** — prompts for a title and inserts a centered, large
+  HTML title block at the cursor:
+
+  ```html
+  <div align="center">
+    <span style="font-size: 2.5em; font-weight: 700;">My Title</span>
+  </div>
+  ```
+
+  Markdown alone cannot reliably center text, so this uses inline HTML.
+  The preview renders it correctly. Title text is HTML-escaped.
+
+- **Clean/Fix Table** — cleans the selected Markdown table (or the table
+  detected around the cursor when nothing is selected). It fixes common
+  artifacts produced by Word-to-Markdown conversion:
+  - Removes repeated-title rows where every cell on row 1 is the same
+    value (e.g. `| OneLake Security | OneLake Security | … |`).
+  - Drops empty rows and stray separator rows.
+  - Replaces empty cells with `-`.
+  - Detects **field/value metadata** tables (label columns ending with
+    `:`, with a spacer column) and rewrites them as a clean two-column
+    `Field` / `Details` table — pluralising labels (`Engineer` →
+    `Engineers`, `Architect` → `Architects`, `Engineering Manager` →
+    `Engineering Managers`) and bolding `Status: Draft`.
+  - Detects **Promotion Plan** tables (`CHANNEL / Y/N / CONTENT NEEDED /
+    OWNER / TIMING`) and rewrites them with normalised headers and
+    aligned columns.
+  - For any other table, performs a generic cleanup: trims cells, picks
+    the first meaningful row as the header, generates an alignment row,
+    bolds the first column.
+
+  If no table is selected and none is detected near the cursor, the UI
+  shows: *"No Markdown table selected or detected."*
 6. Click **Open Folder** to reveal the file in Windows Explorer.
 
 ## Batch conversion

@@ -373,6 +373,9 @@
                 <div class="toolbar-sep"></div>
                 <button class="btn-tool" title="Important callout" onclick="fmt('important')" style="color:#b45309;">Important</button>
                 <button class="btn-tool" title="Note callout"      onclick="fmt('note')"      style="color:#1d4ed8;">Note</button>
+                <div class="toolbar-sep"></div>
+                <button class="btn-tool" title="Insert centered HTML title" onclick="insertTitle()">Insert Title</button>
+                <button class="btn-tool" title="Clean or fix the selected/current Markdown table" onclick="cleanFixTable()">Clean/Fix Table</button>
             </div>
 
             <div class="workspace">
@@ -732,6 +735,295 @@ function fmt(type) {
     }
     ta.dispatchEvent(new Event('input'));
     updatePreview();
+}
+
+// ── Editor helpers: insertAtCursor / table selection ──────────────────────
+function insertAtCursor(text) {
+    const ta = markdownEditor;
+    const start = ta.selectionStart;
+    const end   = ta.selectionEnd;
+    ta.focus();
+    ta.setRangeText(text, start, end, 'end');
+    ta.dispatchEvent(new Event('input'));
+    updatePreview();
+}
+
+function _isPipeLine(line) {
+    return /\|/.test(line) && line.trim().length > 0;
+}
+
+function _expandTableAtCursor() {
+    const ta = markdownEditor;
+    const value = ta.value;
+    const cursor = ta.selectionStart;
+    const lines = value.split('\n');
+
+    // Build (start,end) offsets for each line.
+    const offsets = [];
+    let pos = 0;
+    for (const line of lines) {
+        offsets.push({ start: pos, end: pos + line.length });
+        pos += line.length + 1; // +1 for the \n
+    }
+
+    // Find the line index containing the cursor.
+    let idx = offsets.findIndex(o => cursor >= o.start && cursor <= o.end);
+    if (idx < 0) return null;
+    if (!_isPipeLine(lines[idx])) {
+        // Try the previous line if cursor is at column 0 of an empty line
+        if (idx > 0 && _isPipeLine(lines[idx - 1])) idx -= 1;
+        else return null;
+    }
+
+    let top = idx;
+    while (top > 0 && _isPipeLine(lines[top - 1])) top--;
+    let bot = idx;
+    while (bot < lines.length - 1 && _isPipeLine(lines[bot + 1])) bot++;
+
+    return {
+        text: lines.slice(top, bot + 1).join('\n'),
+        start: offsets[top].start,
+        end:   offsets[bot].end,
+    };
+}
+
+function getSelectedOrCurrentTable() {
+    const ta = markdownEditor;
+    const start = ta.selectionStart;
+    const end   = ta.selectionEnd;
+    if (end > start) {
+        const sel = ta.value.substring(start, end);
+        if (/\|/.test(sel)) return { text: sel, start, end };
+    }
+    return _expandTableAtCursor();
+}
+
+function replaceSelectedOrCurrentTable(cleaned, range) {
+    const ta = markdownEditor;
+    ta.focus();
+    ta.setRangeText(cleaned, range.start, range.end, 'end');
+    ta.dispatchEvent(new Event('input'));
+    updatePreview();
+}
+
+// ── Insert Title ──────────────────────────────────────────────────────────
+function insertTitle() {
+    const raw = prompt('Title text:');
+    if (raw == null) return;
+    const text = raw.trim();
+    if (!text) return;
+    const safe = escapeHtml(text);
+    const block = `\n\n<div align="center">\n  <span style="font-size: 2.5em; font-weight: 700;">${safe}</span>\n</div>\n\n`;
+    insertAtCursor(block);
+}
+
+// ── Clean/Fix Table ───────────────────────────────────────────────────────
+function cleanFixTable() {
+    const range = getSelectedOrCurrentTable();
+    if (!range) {
+        alert('No Markdown table selected or detected.');
+        return;
+    }
+    const cleaned = cleanMarkdownTable(range.text);
+    if (!cleaned) {
+        alert('No Markdown table selected or detected.');
+        return;
+    }
+    replaceSelectedOrCurrentTable(cleaned, range);
+}
+
+/**
+ * cleanMarkdownTable(markdownTableText)
+ *
+ * Parses a Markdown pipe table, removes Word-conversion artifacts, and
+ * rebuilds a valid table. Specialises for Field/Details metadata tables and
+ * Promotion-Plan style tables; otherwise falls back to a generic cleanup.
+ */
+function cleanMarkdownTable(markdownTableText) {
+    if (!markdownTableText) return '';
+    const lines = markdownTableText.split('\n');
+
+    // Parse pipe rows into arrays of trimmed cells.
+    const rows = [];
+    for (const raw of lines) {
+        if (!_isPipeLine(raw)) continue;
+        let line = raw.trim();
+        if (line.startsWith('|')) line = line.slice(1);
+        if (line.endsWith('|'))   line = line.slice(0, -1);
+        const cells = line.split('|').map(c => c.trim());
+        rows.push(cells);
+    }
+    if (!rows.length) return '';
+
+    // Drop separator rows (|---|---|) and fully empty rows.
+    const isSeparatorCell = c => /^:?-{2,}:?$/.test(c);
+    const filtered = rows.filter(r => {
+        if (r.every(c => c === '')) return false;
+        if (r.length && r.every(isSeparatorCell)) return false;
+        return true;
+    });
+    if (!filtered.length) return '';
+
+    // Detect & drop a repeated-title row (all cells equal, ≥2 columns).
+    const isRepeatedTitle = r => r.length >= 2 && r.every(c => c !== '' && c === r[0]);
+    let working = filtered.slice();
+    if (isRepeatedTitle(working[0])) working.shift();
+    if (!working.length) return '';
+
+    // ── Promotion plan ────────────────────────────────────────────────
+    const promo = _tryPromotionPlan(working);
+    if (promo) return promo;
+
+    // ── Field / Details (label : value, optional spacer + label : value)
+    const fd = _tryFieldDetails(working);
+    if (fd) return fd;
+
+    // ── Generic fallback ──────────────────────────────────────────────
+    return _genericTable(working);
+}
+
+function _padRow(cells, n) {
+    const out = cells.slice(0, n);
+    while (out.length < n) out.push('');
+    return out.map(c => (c === '' ? '-' : c));
+}
+
+function _renderTable(headers, alignments, bodyRows) {
+    const sep = alignments.map(a => {
+        if (a === 'center') return ':---:';
+        if (a === 'right')  return '---:';
+        return ':---';
+    });
+    const header = '| ' + headers.join(' | ') + ' |';
+    const align  = '| ' + sep.join(' | ') + ' |';
+    const body   = bodyRows.map(r => '| ' + r.join(' | ') + ' |');
+    return [header, align, ...body].join('\n');
+}
+
+function _tryPromotionPlan(rows) {
+    if (rows.length < 2) return null;
+    const header = rows[0].map(c => c.toLowerCase().replace(/\s+/g, ' ').trim());
+    const wanted = ['channel', 'y/n', 'content needed', 'owner', 'timing'];
+    if (header.length < 5) return null;
+    const matches = wanted.every(w => header.includes(w));
+    if (!matches) return null;
+
+    // Reorder columns to canonical order.
+    const colIdx = wanted.map(w => header.indexOf(w));
+    const data = rows.slice(1)
+        .map(r => colIdx.map(i => (r[i] || '').trim()))
+        .filter(r => r.some(c => c !== ''));
+
+    const body = data.map(r => {
+        const padded = _padRow(r, 5);
+        if (padded[0] && padded[0] !== '-') padded[0] = `**${padded[0]}**`;
+        return padded;
+    });
+
+    const headers = ['Channel', 'Y/N', 'Content Needed', 'Owner', 'Timing'];
+    const aligns  = ['left', 'center', 'center', 'left', 'left'];
+    return _renderTable(headers, aligns, body);
+}
+
+function _normalizeFieldName(name) {
+    const cleaned = name.replace(/:\s*$/, '').trim();
+    const map = {
+        'engineering manager': 'Engineering Managers',
+        'engineering managers': 'Engineering Managers',
+        'engineer':  'Engineers',
+        'engineers': 'Engineers',
+        'architect':  'Architects',
+        'architects': 'Architects',
+    };
+    const key = cleaned.toLowerCase();
+    return map[key] || cleaned;
+}
+
+function _looksLikeLabel(s) {
+    if (!s) return false;
+    if (/:\s*$/.test(s)) return true;
+    // Plain words like "Architect" / "Template Version" — accept short
+    // capitalised phrases without a colon.
+    if (s.length <= 40 && /^[A-Za-z][A-Za-z0-9 /\-_.()]*$/.test(s)) return true;
+    return false;
+}
+
+function _tryFieldDetails(rows) {
+    if (!rows.length) return null;
+    const cols = Math.max(...rows.map(r => r.length));
+    if (cols < 2) return null;
+
+    // Heuristic: at least one row must have a label-shaped first cell.
+    const hasLabelShape = rows.some(r => /:\s*$/.test(r[0] || ''));
+    // Skip auto-detection if it might be a multi-column data table
+    // (e.g. a header row with several distinct headings).
+    if (!hasLabelShape) return null;
+
+    const pairs = [];
+
+    // Pass 1: left label/value pairs (cols 0/1).
+    for (const r of rows) {
+        const l1 = (r[0] || '').trim();
+        const v1 = (r[1] || '').trim();
+        if (l1 && _looksLikeLabel(l1)) {
+            pairs.push([_normalizeFieldName(l1), v1]);
+        }
+    }
+    // Pass 2: right label/value pairs (cols 3/4 in 5-col tables, or 2/3 in 4-col).
+    for (const r of rows) {
+        let li = -1, vi = -1;
+        if (cols >= 5)      { li = 3; vi = 4; }
+        else if (cols === 4){ li = 2; vi = 3; }
+        else continue;
+        const l2 = (r[li] || '').trim();
+        const v2 = (r[vi] || '').trim();
+        if (l2 && _looksLikeLabel(l2)) {
+            pairs.push([_normalizeFieldName(l2), v2]);
+        }
+    }
+
+    if (pairs.length < 2) return null;
+
+    // Deduplicate by field name (keep first non-empty value).
+    const seen = new Map();
+    for (const [field, value] of pairs) {
+        if (!seen.has(field)) {
+            seen.set(field, value);
+        } else if (!seen.get(field) && value) {
+            seen.set(field, value);
+        }
+    }
+
+    const body = [...seen.entries()].map(([field, value]) => {
+        let v = (value || '').trim() || '-';
+        if (field === 'Status' && v.toLowerCase() === 'draft') v = '**Draft**';
+        return [`**${field}**`, v];
+    });
+
+    return _renderTable(['Field', 'Details'], ['left', 'left'], body);
+}
+
+function _genericTable(rows) {
+    const cols = Math.max(...rows.map(r => r.length));
+    if (cols < 1) return '';
+
+    const padded = rows.map(r => _padRow(r, cols));
+    // Drop trailing fully-dash rows (originally fully-empty).
+    while (padded.length && padded[padded.length - 1].every(c => c === '-')) {
+        padded.pop();
+    }
+    if (!padded.length) return '';
+
+    const headers = padded[0];
+    const aligns  = headers.map(() => 'left');
+    const body = padded.slice(1).map(r => {
+        const out = r.slice();
+        if (out[0] && out[0] !== '-' && !/^\*\*.+\*\*$/.test(out[0])) {
+            out[0] = `**${out[0]}**`;
+        }
+        return out;
+    });
+    return _renderTable(headers, aligns, body);
 }
 
 function stopService() {
