@@ -1,62 +1,54 @@
-import asyncio
-import io
-import json
+"""
+Word-to-Markdown Converter — local FastAPI server.
+
+Endpoints:
+    GET  /                         Static index.html
+    GET  /health                   Liveness probe
+    GET  /api/status               Docling readiness
+    POST /api/convert              Single-file conversion
+    POST /api/convert-batch        Batch conversion
+    POST /api/save-changes         Persist edited Markdown
+    GET  /api/open-folder          Open the Outputs folder in Explorer
+    POST /api/shutdown             Stop the server
+    GET  /logs/latest              Tail app.log
+    DELETE /logs/latest            Truncate app.log
+"""
+
+from __future__ import annotations
+
 import os
-import queue
-import shutil
-import subprocess
-import tempfile
-import time
 import re
+import shutil
+import tempfile
 import threading
-import zipfile
+import time
 from pathlib import Path
 from typing import List, Optional
 
 from fastapi import FastAPI, Request, UploadFile, File, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from logging_config import setup_logging
 from paths import (
     OUTPUTS_ROOT,
-    OUTPUTS_SINGLE,
-    OUTPUTS_BATCH,
-    OUTPUTS_IMAGES,
+    SINGLE_OUTPUT_ROOT,
+    BATCH_OUTPUT_ROOT,
+    IMAGES_ROOT,
     TEMP_ROOT,
-    TEMP_CLOUD,
-    TEMP_PROTECTED,
     LOGS_ROOT,
-)
-from protected_file_access import (
-    convert_docx_with_docling_fallback,
-    ProtectedFileAccessError,
-    run_protected_access_diagnostics,
-    test_protected_file_access,
-)
-from word_dispatch_pipeline import batch_convert as word_dispatch_batch_convert
-from graph_auth import get_auth_client, GraphAuthClient
-from cloud_converter import batch_convert_cloud
-from mip_helper_client import (
-    inspect_file as mip_inspect_file,
-    unprotect_file as mip_unprotect_file,
-    reapply_protection as mip_reapply_protection,
-    cleanup_paths as mip_cleanup_paths,
-    fetch_and_unprotect_url as mip_fetch_and_unprotect_url,
-    MipAccessDeniedError,
-    MipReapplyFailedError,
-    MipHelperError,
 )
 
 logger = setup_logging()
 
-app = FastAPI()
+app = FastAPI(title="Word-to-Markdown Converter")
 
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     import traceback
+    logger.exception(f"Unhandled error in {request.method} {request.url.path}: {exc}")
     return JSONResponse(
         status_code=500,
         content={
@@ -66,13 +58,13 @@ async def global_exception_handler(request: Request, exc: Exception):
         },
     )
 
+
 # ---------------------------------------------------------------------------
-# Docling is loaded lazily in a background thread so the HTTP server is
-# reachable within ~1 second of launch.
+# Docling lazy initialisation
 # ---------------------------------------------------------------------------
 _converter_ready = threading.Event()
 _converter = None
-_converter_error = None
+_converter_error: Optional[str] = None
 
 
 def _init_converter() -> None:
@@ -97,7 +89,7 @@ threading.Thread(target=_init_converter, daemon=True, name="docling-init").start
 
 
 def _get_converter():
-    """Block until converter is ready then return it (or raise on init failure)."""
+    """Block until the converter is ready then return it (or raise on failure)."""
     _converter_ready.wait(timeout=120)
     if _converter_error:
         raise RuntimeError(f"Document converter failed to initialise: {_converter_error}")
@@ -107,14 +99,8 @@ def _get_converter():
 
 
 # ---------------------------------------------------------------------------
-# Directory config
+# Naming helpers
 # ---------------------------------------------------------------------------
-# Runtime folders are created and validated by paths.py at import time.
-# Local helpers below alias the canonical names for backwards compatibility.
-
-GLOBAL_IMAGES_DIR = OUTPUTS_IMAGES
-LOGS_DIR = LOGS_ROOT
-
 
 def sanitize_name(name: str) -> str:
     clean = name.lower()
@@ -128,11 +114,19 @@ def get_unique_safe_name(base_name: str) -> str:
     safe_base = sanitize_name(base_name) or "document"
     safe_name = safe_base
     counter = 2
-    while (OUTPUTS_SINGLE / f"{safe_name}.md").exists() or (GLOBAL_IMAGES_DIR / safe_name).exists():
+    while (
+        (SINGLE_OUTPUT_ROOT / f"{safe_name}.md").exists()
+        or (BATCH_OUTPUT_ROOT / f"{safe_name}.md").exists()
+        or (IMAGES_ROOT / safe_name).exists()
+    ):
         safe_name = f"{safe_base}-{counter}"
         counter += 1
     return safe_name
 
+
+# ---------------------------------------------------------------------------
+# Middleware
+# ---------------------------------------------------------------------------
 
 app.add_middleware(
     CORSMiddleware,
@@ -160,16 +154,17 @@ def convert_file_to_markdown(
     upload_file: UploadFile,
     *,
     include_markdown: bool = True,
-    output_dir: Path = OUTPUTS_SINGLE,
+    output_dir: Path = SINGLE_OUTPUT_ROOT,
 ) -> dict:
+    """Convert one uploaded ``.docx`` file to Markdown using Docling."""
     original_name = Path(upload_file.filename or "document").stem
     safe_name = get_unique_safe_name(original_name)
-    spec_image_folder = GLOBAL_IMAGES_DIR / safe_name
-    spec_image_folder.mkdir(parents=True, exist_ok=True)
+    image_folder = IMAGES_ROOT / safe_name
+    image_folder.mkdir(parents=True, exist_ok=True)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     t0 = time.perf_counter()
-    logger.info(f"[CONVERT] start | file={upload_file.filename} | mode=local")
+    logger.info(f"[CONVERT] start | file={upload_file.filename}")
 
     tmp_path: Optional[Path] = None
     try:
@@ -179,26 +174,21 @@ def convert_file_to_markdown(
 
         from docling_core.types.doc import PictureItem  # noqa: PLC0415
 
-        def _docling_to_markdown(path: str) -> str:
-            conv_res = _get_converter().convert(Path(path))
+        conv_res = _get_converter().convert(tmp_path)
 
-            picture_counter = 0
-            for element, _level in conv_res.document.iterate_items():
-                if isinstance(element, PictureItem):
-                    picture_counter += 1
-                    img_name = f"image_{picture_counter}.png"
-                    img_path = spec_image_folder / img_name
-                    with img_path.open("wb") as fp:
-                        element.get_image(conv_res.document).save(fp, "PNG")
+        picture_counter = 0
+        for element, _level in conv_res.document.iterate_items():
+            if isinstance(element, PictureItem):
+                picture_counter += 1
+                img_name = f"image_{picture_counter}.png"
+                with (image_folder / img_name).open("wb") as fp:
+                    element.get_image(conv_res.document).save(fp, "PNG")
 
-            raw_markdown = conv_res.document.export_to_markdown(image_placeholder="IMAGE_TOKEN")
-            final_md = raw_markdown
-            for i in range(1, picture_counter + 1):
-                tag = f"![spec-image](Images/{safe_name}/image_{i}.png)"
-                final_md = final_md.replace("IMAGE_TOKEN", tag, 1)
-            return final_md
-
-        final_markdown = convert_docx_with_docling_fallback(str(tmp_path), _docling_to_markdown)
+        raw_markdown = conv_res.document.export_to_markdown(image_placeholder="IMAGE_TOKEN")
+        final_markdown = raw_markdown
+        for i in range(1, picture_counter + 1):
+            tag = f"![spec-image](Images/{safe_name}/image_{i}.png)"
+            final_markdown = final_markdown.replace("IMAGE_TOKEN", tag, 1)
 
         md_file_path = output_dir / f"{safe_name}.md"
         with open(md_file_path, "w", encoding="utf-8") as f:
@@ -236,29 +226,6 @@ async def converter_status():
     return {"converter_ready": ready, "error": _converter_error}
 
 
-@app.get("/api/protected-access-check")
-async def protected_access_check():
-    return run_protected_access_diagnostics()
-
-
-@app.post("/api/protected-file-check")
-async def protected_file_check(file: UploadFile = File(...)):
-    filename = file.filename or ""
-    if not filename.lower().endswith(".docx"):
-        raise HTTPException(status_code=400, detail="Only .docx files are supported for this check.")
-
-    tmp_path: Optional[Path] = None
-    try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".docx", dir=str(TEMP_ROOT)) as tmp:
-            shutil.copyfileobj(file.file, tmp)
-            tmp_path = Path(tmp.name)
-        result = test_protected_file_access(tmp_path)
-        return {"file": filename, **result}
-    finally:
-        if tmp_path and tmp_path.exists():
-            tmp_path.unlink(missing_ok=True)
-
-
 # ---------------------------------------------------------------------------
 # Static / utility
 # ---------------------------------------------------------------------------
@@ -274,7 +241,7 @@ app.mount("/Outputs", StaticFiles(directory=str(OUTPUTS_ROOT)), name="Outputs")
 @app.get("/api/open-folder")
 async def open_folder():
     os.startfile(OUTPUTS_ROOT)
-    return {"status": "opened"}
+    return {"status": "opened", "folder": str(OUTPUTS_ROOT)}
 
 
 @app.post("/api/shutdown")
@@ -292,11 +259,14 @@ async def shutdown_app():
 @app.post("/api/save-changes")
 async def save_changes(data: dict = Body(...)):
     doc_name = data.get("doc_name")
-    content = data.get("markdown")
-    file_path = OUTPUTS_SINGLE / f"{doc_name}.md"
+    content = data.get("markdown", "")
+    if not doc_name:
+        raise HTTPException(status_code=400, detail="doc_name is required.")
+    file_path = SINGLE_OUTPUT_ROOT / f"{doc_name}.md"
+    file_path.parent.mkdir(parents=True, exist_ok=True)
     with open(file_path, "w", encoding="utf-8") as f:
         f.write(content)
-    return {"status": "saved"}
+    return {"status": "saved", "path": str(file_path)}
 
 
 # ---------------------------------------------------------------------------
@@ -305,12 +275,16 @@ async def save_changes(data: dict = Body(...)):
 
 @app.post("/api/convert")
 async def convert_document(file: UploadFile = File(...)):
+    filename = file.filename or ""
+    if not filename.lower().endswith(".docx"):
+        raise HTTPException(status_code=400, detail="Only .docx files are supported.")
     try:
-        single_result = convert_file_to_markdown(file, include_markdown=True)
+        result = convert_file_to_markdown(file, include_markdown=True)
         return {
-            "markdown": single_result["markdown"],
-            "doc_name": single_result["doc_name"],
-            "folder_created": str(OUTPUTS_ROOT),
+            "markdown": result["markdown"],
+            "doc_name": result["doc_name"],
+            "output_file": result["output_file"],
+            "folder_created": str(SINGLE_OUTPUT_ROOT),
         }
     except HTTPException:
         raise
@@ -324,9 +298,9 @@ async def convert_documents_batch(files: List[UploadFile] = File(...)):
     if not files:
         raise HTTPException(status_code=400, detail="No files were provided.")
 
-    converted = []
-    skipped = []
-    failed = []
+    converted: list[dict] = []
+    skipped: list[dict] = []
+    failed: list[dict] = []
 
     for upload_file in files:
         filename = upload_file.filename or ""
@@ -334,17 +308,28 @@ async def convert_documents_batch(files: List[UploadFile] = File(...)):
             skipped.append({"file": filename, "reason": "Only .docx files are supported for batch conversion."})
             continue
         try:
-            item = convert_file_to_markdown(upload_file, include_markdown=False, output_dir=OUTPUTS_BATCH)
-            converted.append({"file": filename, "doc_name": item["doc_name"], "output_file": item["output_file"]})
+            item = convert_file_to_markdown(
+                upload_file,
+                include_markdown=False,
+                output_dir=BATCH_OUTPUT_ROOT,
+            )
+            converted.append({
+                "file": filename,
+                "doc_name": item["doc_name"],
+                "output_file": item["output_file"],
+            })
         except Exception as exc:
             logger.exception(f"Unhandled error in /api/convert-batch for {filename}: {exc}")
             failed.append({"file": filename, "error": str(exc)})
 
     if not converted and not skipped and failed:
-        raise HTTPException(status_code=500, detail={"message": "Batch conversion failed for all eligible files.", "failed": failed})
+        raise HTTPException(
+            status_code=500,
+            detail={"message": "Batch conversion failed for all eligible files.", "failed": failed},
+        )
 
     return {
-        "folder_created": str(OUTPUTS_BATCH),
+        "folder_created": str(BATCH_OUTPUT_ROOT),
         "converted_count": len(converted),
         "skipped_count": len(skipped),
         "failed_count": len(failed),
@@ -354,504 +339,6 @@ async def convert_documents_batch(files: List[UploadFile] = File(...)):
     }
 
 
-@app.post("/batch-convert")
-async def batch_convert_sse(data: dict = Body(...)):
-    """Batch-convert DLP/IRM-protected .docx files via Word COM + Docling (SSE)."""
-    input_folder = (data or {}).get("input_folder")
-    output_folder = (data or {}).get("output_folder")
-    max_workers = int((data or {}).get("max_workers", 4))
-
-    if not input_folder:
-        raise HTTPException(status_code=400, detail="input_folder is required.")
-    if not output_folder:
-        raise HTTPException(status_code=400, detail="output_folder is required.")
-    if max_workers < 1:
-        raise HTTPException(status_code=400, detail="max_workers must be >= 1.")
-
-    logger.info(f"[CONVERT] start | mode=batch-local | input={input_folder} | workers={max_workers}")
-
-    event_queue: "queue.Queue[dict | None]" = queue.Queue()
-
-    def _emit(event: dict) -> None:
-        if event.get("status") == "done":
-            logger.info(f"[CONVERT] done  | file={event.get('file')} | elapsed={event.get('elapsed_ms')}ms | mode=batch-local")
-        elif event.get("status") == "failed":
-            logger.error(f"[CONVERT] fail  | file={event.get('file')} | error={event.get('error')} | mode=batch-local")
-        event_queue.put(event)
-
-    def _run_batch() -> None:
-        try:
-            summary = word_dispatch_batch_convert(
-                input_folder=input_folder,
-                output_folder=output_folder,
-                max_workers=max_workers,
-                progress_callback=_emit,
-            )
-            event_queue.put(summary)
-        except Exception as exc:
-            logger.exception(f"Unhandled error in /batch-convert: {exc}")
-            event_queue.put({"status": "failed", "error": str(exc)})
-        finally:
-            event_queue.put(None)
-
-    threading.Thread(target=_run_batch, daemon=True, name="batch-convert-sse").start()
-
-    async def _stream_events():
-        while True:
-            item = await asyncio.to_thread(event_queue.get)
-            if item is None:
-                break
-            yield f"data: {json.dumps(item)}\n\n"
-
-    return StreamingResponse(
-        _stream_events(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
-    )
-
-
-# ---------------------------------------------------------------------------
-# Cloud mode — protection check
-# ---------------------------------------------------------------------------
-
-@app.post("/check-protection")
-async def check_protection(file: UploadFile = File(...)):
-    raw = await file.read()
-    protected = not zipfile.is_zipfile(io.BytesIO(raw))
-    return {"filename": file.filename, "protected": protected}
-
-
-# ---------------------------------------------------------------------------
-# Cloud mode — auth endpoints
-# ---------------------------------------------------------------------------
-
-@app.get("/auth/debug")
-def auth_debug():
-    import shutil, os, subprocess, traceback
-    try:
-        return {
-            "az_which": shutil.which("az"),
-            "az_cmd_which": shutil.which("az.cmd"),
-            "PATH": os.environ.get("PATH", ""),
-            "cwd": os.getcwd(),
-        }
-    except Exception as e:
-        return {"error": str(e), "traceback": traceback.format_exc()}
-
-@app.get("/auth/status")
-def auth_status():
-    import shutil, subprocess, json, os, traceback
-    try:
-        # Resolve az — check PATH and known Windows install locations
-        cmd = (
-            shutil.which("az")
-            or shutil.which("az.cmd")
-            or (r"C:\Program Files (x86)\Microsoft SDKs\Azure\CLI2\wbin\az.cmd" if os.path.exists(r"C:\Program Files (x86)\Microsoft SDKs\Azure\CLI2\wbin\az.cmd") else None)
-            or (r"C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin\az.cmd" if os.path.exists(r"C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin\az.cmd") else None)
-        )
-        if not cmd:
-            return {
-                "authenticated": False,
-                "account": None,
-                "error": "az_not_found",
-            }
-
-        # Pass extended PATH so subprocess can find az dependencies
-        env = {
-            **os.environ,
-            "PATH": os.environ.get("PATH", "")
-            + r";C:\Program Files (x86)\Microsoft SDKs\Azure\CLI2\wbin"
-            + r";C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin",
-        }
-
-        result = subprocess.run(
-            [cmd, "account", "show"],
-            capture_output=True,
-            text=True,
-            timeout=15,
-            env=env,
-        )
-
-        if result.returncode != 0:
-            return {
-                "authenticated": False,
-                "account": None,
-                "error": "not_logged_in",
-                "stderr": result.stderr.strip(),
-            }
-
-        data = json.loads(result.stdout)
-        return {
-            "authenticated": True,
-            "account": data.get("user", {}).get("name"),
-            "error": None,
-        }
-
-    except Exception as e:
-        return {
-            "authenticated": False,
-            "account": None,
-            "error": str(e),
-            "traceback": traceback.format_exc(),
-        }
-
-
-@app.post("/auth/login")
-async def auth_login():
-    import shutil, subprocess, json, os, asyncio, traceback
-    try:
-        cmd = (
-            shutil.which("az")
-            or shutil.which("az.cmd")
-            or (r"C:\Program Files (x86)\Microsoft SDKs\Azure\CLI2\wbin\az.cmd" if os.path.exists(r"C:\Program Files (x86)\Microsoft SDKs\Azure\CLI2\wbin\az.cmd") else None)
-            or (r"C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin\az.cmd" if os.path.exists(r"C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin\az.cmd") else None)
-        )
-        if not cmd:
-            raise HTTPException(status_code=500, detail="Azure CLI not found")
-
-        env = {
-            **os.environ,
-            "PATH": os.environ.get("PATH", "")
-            + r";C:\Program Files (x86)\Microsoft SDKs\Azure\CLI2\wbin"
-            + r";C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin",
-        }
-
-        def run_login():
-            result = subprocess.run(
-                [cmd, "login"],
-                capture_output=True,
-                text=True,
-                env=env,
-            )
-            return result.returncode == 0
-
-        success = await asyncio.get_event_loop().run_in_executor(None, run_login)
-        if not success:
-            raise HTTPException(status_code=401, detail="Login failed or was cancelled")
-
-        result = subprocess.run(
-            [cmd, "account", "show"],
-            capture_output=True,
-            text=True,
-            env=env,
-        )
-        data = json.loads(result.stdout)
-        return {
-            "authenticated": True,
-            "account": data.get("user", {}).get("name"),
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"{str(e)}\n{traceback.format_exc()}")
-
-
-@app.post("/auth/logout")
-async def auth_logout():
-    cmd = shutil.which("az") or shutil.which("az.cmd")
-    if cmd:
-        logger.debug(f"subprocess: {cmd} logout")
-        result = subprocess.run([cmd, "logout"], capture_output=True, text=True)
-        logger.debug(f"returncode: {result.returncode}")
-        if result.stderr:
-            logger.warning(f"stderr: {result.stderr.strip()}")
-    logger.info("[AUTH] logged out")
-    return {"authenticated": False, "account": None}
-
-
-# ---------------------------------------------------------------------------
-# Cloud mode — single file convert
-# ---------------------------------------------------------------------------
-
-@app.post("/cloud/convert")
-async def cloud_convert(data: dict = Body(...)):
-    import traceback
-    import urllib.parse
-
-    source_url = (data or {}).get("source_url", "").strip()
-    dest_sp_url = (data or {}).get("dest_sharepoint_url") or None
-    local_dir = (data or {}).get("local_output_dir") or None
-
-    if not source_url:
-        raise HTTPException(status_code=400, detail="source_url is required.")
-    if not dest_sp_url and not local_dir:
-        raise HTTPException(status_code=400, detail="Supply at least one of dest_sharepoint_url or local_output_dir.")
-
-    start = time.time()
-    cleanup_paths: list[Path] = []
-
-    BOTH_FAILED_MSG = (
-        "The file could not be converted. Cloud access failed, and "
-        "Microsoft Purview did not allow the app to open or export "
-        "the protected file."
-    )
-    TIMEOUT_MSG = "The conversion exceeded the 2-minute limit and was cancelled."
-
-    async def _do_conversion() -> dict:
-        from graph_client import (  # noqa: PLC0415
-            resolve_url, resolve_output_folder, download_file_bytes, upload_markdown,
-        )
-        from cloud_converter import _docx_bytes_to_markdown, is_protected  # noqa: PLC0415
-
-        logger.info(f"[CLOUD] cloud_conversion_started | source={source_url}")
-
-        # ── Step 1 — Acquire delegated token via MSAL/Azure CLI ────────────
-        try:
-            token = await GraphAuthClient().get_token_async()
-            logger.info("[CLOUD] graph_token_acquired")
-        except Exception as e:
-            logger.error(f"[CLOUD] graph_token_acquired failed | {e}")
-            raise HTTPException(status_code=401, detail=f"Authentication failed: {e}")
-
-        # ── Step 2 — Try Graph fast path (resolve + download) ──────────────
-        file_bytes: Optional[bytes] = None
-        graph_failed_with_access = False
-        graph_error: Optional[Exception] = None
-
-        try:
-            drive_id, item_id = await asyncio.to_thread(resolve_url, source_url, token)
-            file_bytes = await asyncio.to_thread(download_file_bytes, drive_id, item_id, token)
-            logger.info(f"[CLOUD] graph download ok | {len(file_bytes)} bytes")
-        except PermissionError as e:
-            graph_failed_with_access = True
-            graph_error = e
-            logger.warning(f"[CLOUD] graph_resolve_failed | access denied | {e}")
-        except Exception as e:
-            msg = str(e)
-            if "403" in msg or "401" in msg or "access" in msg.lower() or "denied" in msg.lower():
-                graph_failed_with_access = True
-                graph_error = e
-                logger.warning(f"[CLOUD] graph_resolve_failed | likely access denied | {e}")
-            else:
-                logger.error(f"[CLOUD] graph_resolve_failed | non-access error | {e}")
-                raise HTTPException(status_code=400, detail=f"Could not resolve source URL: {e}")
-
-        markdown: Optional[str] = None
-        used_mip = False
-        label_name: Optional[str] = None
-
-        # ── Step 3 — Decide path: Graph success vs MIP fallback ────────────
-        if file_bytes is not None and not is_protected(file_bytes):
-            # Graph fast path — straight Docling conversion.
-            logger.info("[CLOUD] docling_conversion_started | path=graph")
-            try:
-                markdown = await asyncio.to_thread(_docx_bytes_to_markdown, file_bytes)
-            except Exception as e:
-                logger.error(f"[CLOUD] docling failed | {e}\n{traceback.format_exc()}")
-                raise HTTPException(status_code=422, detail=f"Conversion failed: {e}")
-
-        else:
-            # MIP fallback — either Graph 403'd, or download succeeded but
-            # bytes are protected (RMS/IRM envelope).
-            logger.info(
-                f"[CLOUD] mip_fallback_started | "
-                f"reason={'graph_403' if graph_failed_with_access else 'protected_payload'}"
-            )
-
-            working_path: Optional[Path] = None
-            try:
-                if graph_failed_with_access:
-                    # Helper fetches with user creds and decrypts in one step.
-                    try:
-                        working_path = await asyncio.to_thread(
-                            mip_fetch_and_unprotect_url,
-                            source_url,
-                            os.environ.get("MIP_USER_UPN"),
-                        )
-                    except MipAccessDeniedError as e:
-                        logger.warning(f"[CLOUD] mip_decrypt_denied | {e}")
-                        raise HTTPException(status_code=422, detail=BOTH_FAILED_MSG)
-                    except MipHelperError as e:
-                        logger.error(f"[CLOUD] mip_decrypt failed | {e}")
-                        raise HTTPException(status_code=422, detail=BOTH_FAILED_MSG)
-                else:
-                    # We have protected bytes locally — use inspect/unprotect.
-                    tmp_dir = Path(tempfile.mkdtemp(prefix="mip-src-", dir=str(TEMP_PROTECTED)))
-                    cleanup_paths.append(tmp_dir)
-                    tmp_input = tmp_dir / "source.docx"
-                    tmp_input.write_bytes(file_bytes or b"")
-                    cleanup_paths.append(tmp_input)
-
-                    try:
-                        meta = await asyncio.to_thread(mip_inspect_file, tmp_input)
-                        cleanup_paths.append(meta.metadata_path)
-                        label_name = meta.label_name
-                        working_path = await asyncio.to_thread(
-                            mip_unprotect_file,
-                            tmp_input,
-                            meta.metadata_path,
-                            os.environ.get("MIP_USER_UPN"),
-                        )
-                    except MipAccessDeniedError as e:
-                        logger.warning(f"[CLOUD] mip_decrypt_denied | {e}")
-                        raise HTTPException(status_code=422, detail=BOTH_FAILED_MSG)
-                    except MipHelperError as e:
-                        logger.error(f"[CLOUD] mip_decrypt failed | {e}")
-                        raise HTTPException(status_code=422, detail=BOTH_FAILED_MSG)
-
-                cleanup_paths.append(working_path)
-                logger.info(f"[CLOUD] mip_decrypt_allowed | working={working_path.name}")
-                used_mip = True
-
-                logger.info("[CLOUD] docling_conversion_started | path=mip")
-                try:
-                    working_bytes = working_path.read_bytes()
-                    markdown = await asyncio.to_thread(_docx_bytes_to_markdown, working_bytes)
-                except Exception as e:
-                    logger.error(f"[CLOUD] docling failed (mip path) | {e}")
-                    raise HTTPException(status_code=422, detail=f"Conversion failed: {e}")
-
-            except HTTPException:
-                raise
-
-        # ── Step 4 — Save outputs ──────────────────────────────────────────
-        raw_name = urllib.parse.unquote(source_url.rstrip("/").split("/")[-1])
-        stem = raw_name[:-5] if raw_name.lower().endswith(".docx") else raw_name
-        md_filename = f"{stem}.md"
-        results: dict = {
-            "filename": md_filename,
-            "sharepoint_url": None,
-            "local_path": None,
-            "protected": used_mip,
-            "label_name": label_name,
-            "fallback_used": "mip" if used_mip else "graph",
-        }
-
-        if dest_sp_url:
-            if used_mip:
-                logger.warning("[CLOUD] refusing to upload markdown of a protected file")
-                raise HTTPException(
-                    status_code=422,
-                    detail=(
-                        "Protected files cannot be exported to SharePoint as "
-                        "Markdown (would create an unlabeled copy). Save locally instead."
-                    ),
-                )
-            try:
-                dest_drive_id, dest_folder_id = await asyncio.to_thread(
-                    resolve_output_folder, dest_sp_url, token
-                )
-                sp_url = await asyncio.to_thread(
-                    upload_markdown, dest_drive_id, dest_folder_id, md_filename, markdown, token
-                )
-                results["sharepoint_url"] = sp_url
-            except Exception as e:
-                logger.error(f"[CLOUD] sharepoint upload failed | {e}")
-                raise HTTPException(status_code=500, detail=f"SharePoint upload failed: {e}")
-
-        if local_dir:
-            try:
-                out = Path(local_dir) / md_filename
-                out.parent.mkdir(parents=True, exist_ok=True)
-                out.write_text(markdown, encoding="utf-8")
-                results["local_path"] = str(out)
-            except Exception as e:
-                logger.error(f"[CLOUD] local save failed | {e}")
-                raise HTTPException(status_code=500, detail=f"Local save failed: {e}")
-
-        elapsed = round((time.time() - start) * 1000)
-        logger.info(
-            f"[CLOUD] conversion_completed | path={'mip' if used_mip else 'graph'} | "
-            f"file={md_filename} | {elapsed}ms"
-        )
-        return {**results, "elapsed_ms": elapsed, "markdown": markdown}
-
-    # ── 120s hard timeout wrapping the whole pipeline ──────────────────────
-    try:
-        return await asyncio.wait_for(_do_conversion(), timeout=120)
-    except asyncio.TimeoutError:
-        elapsed = round((time.time() - start) * 1000)
-        logger.error(f"[CLOUD] conversion_timeout | {elapsed}ms | source={source_url}")
-        raise HTTPException(status_code=408, detail=TIMEOUT_MSG)
-    except HTTPException:
-        raise
-    except Exception as e:
-        elapsed = round((time.time() - start) * 1000)
-        logger.exception(f"[CLOUD] unhandled error | {elapsed}ms | {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Unexpected error: {e}\n{traceback.format_exc()}",
-        )
-    finally:
-        if cleanup_paths:
-            try:
-                mip_cleanup_paths(*cleanup_paths)
-                logger.info("[CLOUD] cleanup_completed")
-            except Exception as e:
-                logger.warning(f"[CLOUD] cleanup error | {e}")
-
-
-# ---------------------------------------------------------------------------
-# Cloud mode — batch convert (SSE)
-# ---------------------------------------------------------------------------
-
-@app.post("/cloud/batch-convert")
-async def cloud_batch_convert(data: dict = Body(...)):
-    source_folder_url = (data or {}).get("source_folder_url", "").strip()
-    dest_sp_url = (data or {}).get("dest_sharepoint_url") or None
-    local_dir = (data or {}).get("local_output_dir") or None
-    max_workers = int((data or {}).get("max_workers", 4))
-
-    if not source_folder_url:
-        raise HTTPException(status_code=400, detail="source_folder_url is required.")
-    if not dest_sp_url and not local_dir:
-        raise HTTPException(status_code=400, detail="Supply at least one of dest_sharepoint_url or local_output_dir.")
-    if max_workers < 1:
-        raise HTTPException(status_code=400, detail="max_workers must be >= 1.")
-
-    try:
-        client = GraphAuthClient()
-        token = await client.get_token_async()
-    except RuntimeError as exc:
-        raise HTTPException(status_code=401, detail=str(exc))
-    except Exception as exc:
-        raise HTTPException(status_code=401, detail=f"Authentication failed: {exc}")
-
-    logger.info(f"[CONVERT] start | mode=batch-cloud | source={source_folder_url} | workers={max_workers}")
-
-    event_queue: "queue.Queue[dict | None]" = queue.Queue()
-
-    def _emit(event: dict) -> None:
-        if event.get("type") == "file":
-            if event.get("status") == "success":
-                logger.info(f"[CONVERT] done  | file={event.get('file')} | elapsed={event.get('elapsed_ms')}ms | mode=cloud")
-            else:
-                logger.error(f"[CONVERT] fail  | file={event.get('file')} | error={event.get('error')} | mode=cloud")
-        event_queue.put(event)
-
-    def _run() -> None:
-        try:
-            batch_convert_cloud(
-                source_folder_url=source_folder_url,
-                token=token,
-                dest_sharepoint_url=dest_sp_url,
-                local_output_dir=local_dir,
-                max_workers=max_workers,
-                progress_callback=_emit,
-            )
-        except Exception as exc:
-            logger.exception(f"Unhandled error in /cloud/batch-convert: {exc}")
-            event_queue.put({"type": "error", "message": str(exc)})
-        finally:
-            event_queue.put(None)
-
-    threading.Thread(target=_run, daemon=True, name="cloud-batch-sse").start()
-
-    async def _stream():
-        while True:
-            item = await asyncio.to_thread(event_queue.get)
-            if item is None:
-                break
-            yield f"data: {json.dumps(item)}\n\n"
-
-    return StreamingResponse(
-        _stream(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
-    )
-
-
 # ---------------------------------------------------------------------------
 # Log viewer endpoints
 # ---------------------------------------------------------------------------
@@ -859,7 +346,7 @@ async def cloud_batch_convert(data: dict = Body(...)):
 @app.get("/logs/latest")
 def logs_latest(lines: int = 100):
     lines = min(max(lines, 1), 500)
-    log_path = LOGS_DIR / "app.log"
+    log_path = LOGS_ROOT / "app.log"
     if not log_path.exists():
         return {"lines": []}
     with open(log_path, encoding="utf-8", errors="replace") as f:
@@ -869,7 +356,7 @@ def logs_latest(lines: int = 100):
 
 @app.delete("/logs/latest")
 def logs_clear():
-    log_path = LOGS_DIR / "app.log"
+    log_path = LOGS_ROOT / "app.log"
     if log_path.exists():
         open(log_path, "w").close()
     logger.info("[LOGS] Log file cleared by user")

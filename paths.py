@@ -1,10 +1,10 @@
 """
 Central path configuration for the Word-to-Markdown app.
 
-All runtime locations (outputs, temp, logs, the MIP helper) are routed
-through environment variables loaded from a local .env file. The defaults
-keep everything portable under ``C:/temp/W2MD`` so the app never depends
-on per-user paths like ``C:\\Users\\<name>\\...``.
+All runtime locations (outputs, temp, logs) are routed through environment
+variables loaded from a local ``.env`` file. The defaults keep everything
+portable under ``C:/temp/W2MD`` so the app never depends on per-user paths
+like ``C:\\Users\\<name>\\...``.
 
 Layout (defaults):
     C:/temp/W2MD/
@@ -12,11 +12,8 @@ Layout (defaults):
             Single/        single-file conversions
             Batch/         batch conversion outputs
             Images/        images extracted by Docling
-        Temp/
-            Cloud/         cloud-mode downloads
-            Protected/     decrypted MIP working copies
+        Temp/              short-lived per-request scratch files
         Logs/              app.log + rotated history
-        MipHelper/         published MipHelper.exe
 """
 
 from __future__ import annotations
@@ -43,28 +40,26 @@ APP_DATA_ROOT: Path = _path_from_env("APP_DATA_ROOT", Path("C:/temp/W2MD"))
 OUTPUTS_ROOT: Path = _path_from_env("OUTPUTS_ROOT", APP_DATA_ROOT / "Outputs")
 TEMP_ROOT: Path = _path_from_env("TEMP_ROOT", APP_DATA_ROOT / "Temp")
 LOGS_ROOT: Path = _path_from_env("LOGS_ROOT", APP_DATA_ROOT / "Logs")
-MIP_HELPER_ROOT: Path = _path_from_env("MIP_HELPER_ROOT", APP_DATA_ROOT / "MipHelper")
-MIP_HELPER_PATH: Path = _path_from_env("MIP_HELPER_PATH", MIP_HELPER_ROOT / "MipHelper.exe")
 
-# Conventional sub-folders.
-OUTPUTS_SINGLE = OUTPUTS_ROOT / "Single"
-OUTPUTS_BATCH = OUTPUTS_ROOT / "Batch"
-OUTPUTS_IMAGES = OUTPUTS_ROOT / "Images"
-TEMP_CLOUD = TEMP_ROOT / "Cloud"
-TEMP_PROTECTED = TEMP_ROOT / "Protected"
+# Conventional sub-folders (independently overridable).
+SINGLE_OUTPUT_ROOT: Path = _path_from_env("SINGLE_OUTPUT_ROOT", OUTPUTS_ROOT / "Single")
+BATCH_OUTPUT_ROOT: Path = _path_from_env("BATCH_OUTPUT_ROOT", OUTPUTS_ROOT / "Batch")
+IMAGES_ROOT: Path = _path_from_env("IMAGES_ROOT", OUTPUTS_ROOT / "Images")
+
+# Backwards-compatible aliases used elsewhere in the app.
+OUTPUTS_SINGLE = SINGLE_OUTPUT_ROOT
+OUTPUTS_BATCH = BATCH_OUTPUT_ROOT
+OUTPUTS_IMAGES = IMAGES_ROOT
 
 
 _REQUIRED_DIRS = (
     APP_DATA_ROOT,
     OUTPUTS_ROOT,
-    OUTPUTS_SINGLE,
-    OUTPUTS_BATCH,
-    OUTPUTS_IMAGES,
+    SINGLE_OUTPUT_ROOT,
+    BATCH_OUTPUT_ROOT,
+    IMAGES_ROOT,
     TEMP_ROOT,
-    TEMP_CLOUD,
-    TEMP_PROTECTED,
     LOGS_ROOT,
-    MIP_HELPER_ROOT,
 )
 
 

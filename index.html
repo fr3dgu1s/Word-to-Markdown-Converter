@@ -104,18 +104,6 @@
             .hero-logo { max-width: 140px; }
         }
 
-        /* ── Mode selector ──────────────────────────────────────────────────── */
-        .mode-tabs { display: flex; gap: 0; margin-bottom: 1.25rem; border-radius: var(--radius-md); overflow: hidden; border: 1px solid var(--color-border); }
-        .mode-tab {
-            flex: 1; padding: 0.75rem 1rem; font-size: 0.95rem; font-weight: 600;
-            cursor: pointer; border: none; background: var(--color-surface-alt);
-            color: var(--color-text-muted); transition: background 0.15s, color 0.15s;
-            text-align: center;
-        }
-        .mode-tab + .mode-tab { border-left: 1px solid var(--color-border); }
-        .mode-tab.active { background: var(--color-primary); color: #fff; }
-        .mode-tab:not(.active):hover { background: var(--color-border); }
-
         /* ── Upload zone ────────────────────────────────────────────────────── */
         .upload-area {
             border: 2px dashed var(--color-border); border-radius: var(--radius-md);
@@ -145,11 +133,6 @@
         }
         .batch-status strong { color: var(--color-primary); }
         .batch-status ul { margin: 0.5rem 0 0; padding-left: 1.1rem; }
-        .batch-status .dlp-warn {
-            margin-top: 0.6rem; padding: 0.55rem 0.8rem;
-            background: var(--color-warn-bg); border: 1px solid var(--color-warn-border);
-            color: var(--color-warn-text); border-radius: var(--radius-sm); font-size: 0.83rem;
-        }
 
         /* ── Loader ─────────────────────────────────────────────────────────── */
         .loader { text-align: center; padding: 3rem; font-size: 1.1rem; color: var(--color-text-muted); }
@@ -259,62 +242,6 @@
 
         .dirty-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #f59e0b; margin-left: 5px; vertical-align: middle; }
 
-        /* ── Cloud panel ─────────────────────────────────────────────────────── */
-        .cloud-panel { display: flex; flex-direction: column; gap: 1rem; }
-
-        /* Auth row */
-        .auth-row {
-            display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;
-            padding: 0.65rem 1rem; border-radius: var(--radius-sm);
-            border: 1px solid var(--color-border); background: var(--color-surface-alt);
-            font-size: 0.88rem; min-height: 40px;
-        }
-        .auth-row button {
-            padding: 0.28rem 0.75rem; border-radius: var(--radius-sm); font-size: 0.82rem;
-            font-weight: 600; cursor: pointer; border: 1px solid var(--color-border);
-            background: var(--color-surface); color: var(--color-text);
-        }
-        .auth-row button:hover { border-color: var(--color-primary); color: var(--color-primary); }
-        .dot     { width: 9px; height: 9px; border-radius: 50%; background: var(--color-text-success); display: inline-block; flex-shrink: 0; }
-        .dot-off { width: 9px; height: 9px; border-radius: 50%; background: #f59e0b;                   display: inline-block; flex-shrink: 0; }
-        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
-        .dot-spin { width: 9px; height: 9px; border-radius: 50%; border: 2px solid #f59e0b; border-top-color: transparent; display: inline-block; flex-shrink: 0; animation: spin 0.8s linear infinite; }
-
-        /* Field rows */
-        .field-row { display: flex; flex-direction: column; gap: 0.3rem; }
-        .field-row label { font-size: 0.82rem; font-weight: 600; color: var(--color-text-muted); }
-        .field-row input[type=text], .field-row input[type=url] {
-            padding: 0.5rem 0.75rem; border-radius: var(--radius-sm);
-            border: 1px solid var(--color-border); font-size: 0.9rem; width: 100%;
-            background: var(--color-surface); color: var(--color-text);
-        }
-        .field-row input:focus { outline: 2px solid var(--color-primary); border-color: transparent; }
-
-        /* Toggle row */
-        .toggle-row { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
-        .toggle-row label { font-size: 0.88rem; color: var(--color-text-muted); cursor: pointer; }
-        .sub-field { padding-left: 1.5rem; }
-
-        /* Progress bar */
-        .progress-wrap { display: flex; flex-direction: column; gap: 0.5rem; }
-        .progress-bar-bg { background: var(--color-border); border-radius: 99px; height: 8px; overflow: hidden; }
-        .progress-bar-fill { background: var(--color-primary); height: 100%; width: 0%; border-radius: 99px; transition: width 0.3s ease; }
-        .progress-log { max-height: 160px; overflow-y: auto; font-size: 0.8rem; font-family: monospace; color: var(--color-text-muted); background: var(--color-surface-alt); border: 1px solid var(--color-border); border-radius: var(--radius-sm); padding: 0.5rem 0.75rem; }
-        .progress-log .ok   { color: var(--color-success); }
-        .progress-log .fail { color: var(--color-danger); }
-
-        /* Cloud action buttons row */
-        .cloud-actions { display: flex; gap: 0.6rem; flex-wrap: wrap; }
-        .cloud-actions button {
-            padding: 0.5rem 1.1rem; border-radius: var(--radius-sm); font-weight: 600;
-            font-size: 0.88rem; cursor: pointer; border: none;
-        }
-        #btn-cloud-convert { background: var(--color-primary); color: #fff; }
-        #btn-cloud-convert:hover { background: var(--color-primary-h); }
-        #btn-cloud-batch   { background: var(--color-primary); color: #fff; }
-        #btn-cloud-batch:hover { background: var(--color-primary-h); }
-        #btn-cloud-convert:disabled, #btn-cloud-batch:disabled { opacity: 0.5; cursor: default; }
-
         /* ── Log viewer ──────────────────────────────────────────────────────── */
         .log-card { margin-top: 0.75rem; padding: 0; overflow: hidden; }
         .log-header {
@@ -359,7 +286,7 @@
     <div class="hero-banner">
         <div class="hero-copy">
             <h1>Word to MD — Easy Converter</h1>
-            <p class="hero-subtitle">Convert Word documents to Markdown — local or from SharePoint</p>
+            <p class="hero-subtitle">Convert local Word documents to Markdown</p>
         </div>
         <div class="hero-logo" aria-label="App logo">
             <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAQAAAAEACAYAAABccqhmAAAABmJLR0QA/wD/AP+gvaeTAAAgAElEQVR4nO2deZAk1X3nvy+z7ruqq6v6mj6mj+kZYBghEBKSAGGw15Lt3bUD/aGQI7wObRgElmBAB14rNFpkIQMzgxYEaHcj1ofscBjLsbIIXSCwJFsn4lzQzDQ9www9PX0f1Xd3Vb79o47Oyso6urte5VG/T0R1V2W+zPxVZf5+773f7/feAwiCIAiCIAiCIAiCIAiCIAiCIAiCIAiCIAiCIAiCIAiCIAiCIAiCIAiCIAiCIAiCIAiCIAiCIAiCIAiCIAiCIAiCIAiCIAiCIAiCIAiCIAiCIAiC2AvMaAGIBvM/RrqkDP8I59L1jPMeMMgc7CIDfqaA/wOODr5utIhE4yAD0Cx8eTQsOTP3g7HbADjLlOIAnlKgHMXRAxcbKB1hEGQAmgD5xMjvcuBxAF01HrICjvuVpbHjOPaBtEjZCGMhA2BnHhzpZw48xoD/sMszvKJw3IZ7Bn9WV7kI00AGwI587QWntBw+CoZjADx7PBsH8HXFlb4bdx6c3btwhJkgA2A3TozcIAFPADhY5zNPMs4+nTna/7dgjNf53IRBkAGwC4+cTUpK5iEAH4XA+8qAH2YYvx13D/1a1DWIxkEGwOpwzuQTo3/IGT8BoKVBV90Cwwll0XEMx/rWG3RNQgBkAKzM8dNXykx6ggPvMeT6DKMSwx3puwa/Z8j1iT1DBsCKfG3cJy2vfBoMf4byMf2GwYGnuQO34xODY0bLQuwMMgAWIxfTfwxAt9GyaFgE+OeVrsHH8GGWMVoYojbIAFiFE6c7GaSvMOAPjBalCi8pUG7D0QO/MFoQojpkAMzOsecdUqjzDoB9EUDAaHFqRAH4/1Yc7FP4xGDKaGGI8pABMDMPj75PYsoTYLjcaFF2B7vEOD6buWfgb4yWhNCHDIAZeeB8VHJvHQP4nQAko8XZKxx4jkuZj+Ou4dNGy0IUQwbATHDO5JMjf8TBHgQQN1qcOrMG4ItKavNhHLts02hhiCxkAMzC8dEhxjKPM7DfMFoUwYxICr8jfe/QM0YLQpABMJ4Tb3slvv4ZMHwWgNtocRoGw1NKmt2JTw1MGS1KM0MGwEDkk2c+xLn0GMB7jZbFIBYAfkxJDT6KY0wxWphmhAyAEfzlqQ7JKX8ZwB8aLYoZYAy/ynDpNhztf8FoWZoNMgCNZDum/98BhIwWx2SkAfa4spX+c3xmeMloYZoFMgCN4uTIVbLCn+SMXWO0KKaGYZwp7D7KHWgMZABEc/JcROKZLwD8DgCy0eJYBQ48zVn6T3H3wbeMlsXOkAEQiHx85FbO8CiApNGyWJRVcDykLG1+iXIHxEAGQAQn3hxg4F9lwG8aLYpNeE3h7DbcM/ATowWxG2QA6obJIW2vo/QAAANXSUVORK5CYII="
@@ -368,11 +295,6 @@
     </div>
 
     <!-- Mode selector -->
-    <div class="mode-tabs">
-        <button class="mode-tab active" id="tab-local"  onclick="switchMode('local')">Local Conversion</button>
-        <button class="mode-tab"        id="tab-cloud"  onclick="switchMode('cloud')">Cloud (SharePoint / OneDrive)</button>
-    </div>
-
     <!-- ══════════════════════════════════════════════════════════════════════ -->
     <!-- LOCAL PANEL                                                           -->
     <!-- ══════════════════════════════════════════════════════════════════════ -->
@@ -451,88 +373,6 @@
             </div>
         </div><!-- /step-workspace -->
     </div><!-- /local-panel -->
-
-    <!-- ══════════════════════════════════════════════════════════════════════ -->
-    <!-- CLOUD PANEL                                                           -->
-    <!-- ══════════════════════════════════════════════════════════════════════ -->
-    <div id="cloud-panel" class="hidden cloud-panel">
-
-        <!-- Auth row -->
-        <div class="auth-row" id="auth-row">
-            <span class="dot-spin"></span>
-            <span style="color:var(--color-text-secondary)">Checking authentication…</span>
-        </div>
-
-        <!-- Source URL -->
-        <div class="field-row">
-            <label for="cloud-source-url">Source SharePoint / OneDrive URL</label>
-            <input type="url" id="cloud-source-url" placeholder="https://tenant.sharepoint.com/sites/MySite/Shared Documents/…" />
-        </div>
-
-        <!-- Destination toggles -->
-        <div>
-            <div class="toggle-row">
-                <input type="checkbox" id="dest-sp-toggle" onchange="toggleDestSP(this.checked)" />
-                <label for="dest-sp-toggle">Save Markdown back to SharePoint / OneDrive</label>
-            </div>
-            <div class="sub-field field-row hidden" id="dest-sp-field">
-                <label for="cloud-dest-sp-url">Destination folder URL</label>
-                <input type="url" id="cloud-dest-sp-url" placeholder="https://tenant.sharepoint.com/sites/MySite/Shared Documents/Markdown" />
-            </div>
-        </div>
-
-        <div>
-            <div class="toggle-row">
-                <input type="checkbox" id="dest-local-toggle" onchange="toggleDestLocal(this.checked)" />
-                <label for="dest-local-toggle">Save Markdown locally</label>
-            </div>
-            <div class="sub-field field-row hidden" id="dest-local-field">
-                <label for="cloud-dest-local-dir">Local output folder path</label>
-                <input type="text" id="cloud-dest-local-dir" placeholder="C:\Users\you\Documents\Markdown" />
-            </div>
-        </div>
-
-        <!-- Protected-file warning -->
-        <div class="cloud-protected-warning" style="
-            margin: 0.6rem 0 0.4rem;
-            padding: 0.7rem 0.9rem;
-            border-left: 4px solid #d97706;
-            background: var(--color-warn-bg);
-            color: var(--color-warn-text);
-            font-size: 0.83rem;
-            border-radius: 0 var(--radius-sm) var(--radius-sm) 0;">
-            <strong>Protected files:</strong> Protected files can only be
-            converted or edited if your account and this application are
-            allowed by your organization's Microsoft Purview policies. The
-            app will not bypass DLP, encryption, or sensitivity labels.
-        </div>
-
-        <!-- Cloud-mode state badge -->
-        <div id="cloud-state-badge" class="hidden" style="
-            margin: 0.2rem 0 0.4rem;
-            padding: 0.4rem 0.7rem;
-            border-radius: var(--radius-sm);
-            font-size: 0.78rem;
-            font-weight: 600;
-            display: inline-block;"></div>
-
-        <!-- Actions -->
-        <div class="cloud-actions">
-            <button id="btn-cloud-convert" onclick="cloudConvertSingle()" disabled>Convert Single File</button>
-            <button id="btn-cloud-batch"   onclick="cloudBatch()"         disabled>Batch Convert Folder</button>
-        </div>
-
-        <!-- Progress -->
-        <div class="progress-wrap hidden" id="cloud-progress">
-            <div style="display:flex;justify-content:space-between;font-size:0.82rem;color:var(--color-text-muted);">
-                <span id="progress-label">Starting…</span>
-                <span id="progress-pct">0%</span>
-            </div>
-            <div class="progress-bar-bg"><div class="progress-bar-fill" id="progress-fill"></div></div>
-            <div class="progress-log" id="progress-log"></div>
-        </div>
-
-    </div><!-- /cloud-panel -->
 </div><!-- /card -->
 
 <!-- Log viewer -->
@@ -567,17 +407,6 @@
 </div>
 
 <script>
-// ═══════════════════════════════════════════════════════════════════════════
-// MODE SELECTOR
-// ═══════════════════════════════════════════════════════════════════════════
-function switchMode(mode) {
-    const isCloud = mode === 'cloud';
-    document.getElementById('tab-local').classList.toggle('active', !isCloud);
-    document.getElementById('tab-cloud').classList.toggle('active',  isCloud);
-    document.getElementById('local-panel').classList.toggle('hidden',  isCloud);
-    document.getElementById('cloud-panel').classList.toggle('hidden', !isCloud);
-}
-
 // ═══════════════════════════════════════════════════════════════════════════
 // LOCAL PANEL — refs & state
 // ═══════════════════════════════════════════════════════════════════════════
@@ -735,63 +564,43 @@ function startBatchConversion(files, sourceLabel = 'selected files') {
     const formData = new FormData();
     docxFiles.forEach(f => formData.append('files', f));
 
-    // Client-side DLP detection (ZIP magic bytes)
-    const dlpFiles = [];
-    const readers = docxFiles.map(f => new Promise(resolve => {
-        const r = new FileReader();
-        r.onload = e => {
-            const bytes = new Uint8Array(e.target.result);
-            const isPK = bytes[0]===0x50 && bytes[1]===0x4B && bytes[2]===0x03 && bytes[3]===0x04;
-            if (!isPK) dlpFiles.push(f.name);
-            resolve();
-        };
-        r.readAsArrayBuffer(f.slice(0, 4));
-    }));
+    fetch('/api/convert-batch', { method: 'POST', body: formData })
+        .then(async r => {
+            if (!r.ok) {
+                let msg = 'Server error during batch conversion.';
+                try {
+                    const p = await r.json();
+                    if (p?.detail?.message) msg = p.detail.message;
+                    else if (typeof p?.detail === 'string') msg = p.detail;
+                } catch (_) {}
+                throw new Error(msg);
+            }
+            return r.json();
+        })
+        .then(data => {
+            stepLoading.classList.add('hidden');
+            stepWorkspace.classList.add('hidden');
+            stepUpload.classList.remove('hidden');
 
-    Promise.all(readers).then(() => {
-        fetch('/api/convert-batch', { method: 'POST', body: formData })
-            .then(async r => {
-                if (!r.ok) {
-                    let msg = 'Server error during batch conversion.';
-                    try {
-                        const p = await r.json();
-                        if (p?.detail?.message) msg = p.detail.message;
-                        else if (typeof p?.detail === 'string') msg = p.detail;
-                    } catch (_) {}
-                    throw new Error(msg);
-                }
-                return r.json();
-            })
-            .then(data => {
-                stepLoading.classList.add('hidden');
-                stepWorkspace.classList.add('hidden');
-                stepUpload.classList.remove('hidden');
+            const converted = data.converted || [];
+            const failed    = data.failed    || [];
+            const skipped   = data.skipped   || [];
 
-                const converted = data.converted || [];
-                const failed    = data.failed    || [];
-                const skipped   = data.skipped   || [];
+            const items = [];
+            if (converted.length) items.push(`<li><strong>${converted.length}</strong> file(s) converted and saved.</li>`);
+            if (failed.length)    items.push(`<li><strong>${failed.length}</strong> file(s) failed.</li>`);
+            if (skipped.length)   items.push(`<li><strong>${skipped.length}</strong> file(s) skipped (not .docx).</li>`);
 
-                const items = [];
-                if (converted.length) items.push(`<li><strong>${converted.length}</strong> file(s) converted and saved.</li>`);
-                if (failed.length)    items.push(`<li><strong>${failed.length}</strong> file(s) failed.</li>`);
-                if (skipped.length)   items.push(`<li><strong>${skipped.length}</strong> file(s) skipped (not .docx).</li>`);
-
-                let dlpHtml = '';
-                if (dlpFiles.length) {
-                    dlpHtml = `<div class="dlp-warn"><strong>DLP-protected files detected</strong> — these files could not be converted locally. Use the <strong>Cloud</strong> mode or open them in Word first.<ul>${dlpFiles.map(n=>`<li>${n}</li>`).join('')}</ul></div>`;
-                }
-
-                showBatchStatus(
-                    `<strong>Batch conversion finished.</strong> Output: ${data.folder_created}<ul>${items.join('')}</ul>${dlpHtml}`
-                );
-                if (converted.length) openFolder();
-            })
-            .catch(err => {
-                stepLoading.classList.add('hidden');
-                stepUpload.classList.remove('hidden');
-                alert('Batch conversion failed: ' + err.message);
-            });
-    });
+            showBatchStatus(
+                `<strong>Batch conversion finished.</strong> Output: ${data.folder_created}<ul>${items.join('')}</ul>`
+            );
+            if (converted.length) openFolder();
+        })
+        .catch(err => {
+            stepLoading.classList.add('hidden');
+            stepUpload.classList.remove('hidden');
+            alert('Batch conversion failed: ' + err.message);
+        });
 }
 
 // ── Local .md file ────────────────────────────────────────────────────────
@@ -994,312 +803,6 @@ function resetApp() {
     stepWorkspace.classList.add('hidden');
     stepLoading.classList.add('hidden');
     stepUpload.classList.remove('hidden');
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// CLOUD PANEL
-// ═══════════════════════════════════════════════════════════════════════════
-
-let _cloudAuthed = false;
-
-// ── Auth ──────────────────────────────────────────────────────────────────
-async function checkAuth() {
-    try {
-        const data = await fetch('/auth/status').then(r => r.json());
-        renderAuthRow(data);
-    } catch {
-        document.getElementById('auth-row').innerHTML =
-            `<span class="dot-off"></span><span style="color:var(--color-text-secondary)">Could not reach server.</span>`;
-    }
-}
-
-function renderAuthRow(data) {
-    const el = document.getElementById('auth-row');
-    _cloudAuthed = data.authenticated;
-    if (data.authenticated) {
-        el.innerHTML = `
-            <span class="dot"></span>
-            <span style="color:var(--color-text-success);font-weight:600;">${data.account || 'Signed in'}</span>
-            <button onclick="logout()" style="margin-left:auto;">Sign out</button>`;
-    } else {
-        el.innerHTML = `
-            <span class="dot-off"></span>
-            <span style="color:var(--color-text-secondary)">Not connected</span>
-            <button onclick="login()" style="margin-left:8px;">Sign in with Microsoft →</button>`;
-    }
-    document.getElementById('btn-cloud-convert').disabled = !data.authenticated;
-    document.getElementById('btn-cloud-batch').disabled   = !data.authenticated;
-}
-
-async function login() {
-    const el = document.getElementById('auth-row');
-    el.innerHTML = `<span class="dot-spin"></span><span style="color:var(--color-text-secondary)">Signing in — check your browser…</span>`;
-    document.getElementById('btn-cloud-convert').disabled = true;
-    document.getElementById('btn-cloud-batch').disabled   = true;
-    try {
-        const data = await fetch('/auth/login', { method: 'POST' }).then(r => {
-            if (!r.ok) throw new Error('Login failed or was cancelled.');
-            return r.json();
-        });
-        renderAuthRow(data);
-    } catch (err) {
-        el.innerHTML = `<span class="dot-off"></span><span style="color:var(--color-text-danger)">${err.message} — </span><button onclick="login()" style="margin-left:4px;">Try again</button>`;
-    }
-}
-
-async function logout() {
-    await fetch('/auth/logout', { method: 'POST' });
-    checkAuth();
-}
-
-// Check auth state on page load
-checkAuth();
-
-// ── Destination toggles ───────────────────────────────────────────────────
-function toggleDestSP(on) {
-    document.getElementById('dest-sp-field').classList.toggle('hidden', !on);
-}
-function toggleDestLocal(on) {
-    document.getElementById('dest-local-field').classList.toggle('hidden', !on);
-}
-
-// ── SSE helper for POST requests ──────────────────────────────────────────
-function fetchSSE(url, body, onEvent, onDone) {
-    fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-    }).then(async r => {
-        if (!r.ok) {
-            const txt = await r.text().catch(() => '');
-            throw new Error(`HTTP ${r.status}: ${txt}`);
-        }
-        const reader = r.body.getReader();
-        const dec    = new TextDecoder();
-        let buf = '';
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            buf += dec.decode(value, { stream: true });
-            const parts = buf.split('\n\n');
-            buf = parts.pop();
-            for (const part of parts) {
-                for (const line of part.split('\n')) {
-                    if (line.startsWith('data: ')) {
-                        const ev = { data: line.slice(6) };
-                        try { onEvent(ev); } catch (_) {}
-                    }
-                }
-            }
-        }
-        if (onDone) onDone();
-    }).catch(err => {
-        if (onDone) onDone(err);
-        else console.error('SSE error:', err);
-    });
-}
-
-// ── Cloud single convert ──────────────────────────────────────────────────
-function setCloudStateBadge(state) {
-    // state: null | 'normal' | 'protected-allowed' | 'protected-denied' | 'reapply-failed'
-    const el = document.getElementById('cloud-state-badge');
-    if (!el) return;
-    if (!state) { el.classList.add('hidden'); el.textContent = ''; return; }
-    const styles = {
-        'normal':            { bg: '#e0f2fe', fg: '#0369a1', text: 'Cloud file' },
-        'protected-allowed': { bg: '#ecfdf5', fg: '#065f46', text: 'Protected · access allowed' },
-        'protected-denied':  { bg: '#fef2f2', fg: '#991b1b', text: 'Protected · access denied by Purview' },
-        'reapply-failed':    { bg: '#fef2f2', fg: '#991b1b', text: 'Re-protection failed · upload blocked' },
-    };
-    const s = styles[state] || styles['normal'];
-    el.style.background = s.bg;
-    el.style.color = s.fg;
-    el.textContent = s.text;
-    el.classList.remove('hidden');
-}
-
-async function cloudConvertSingle() {
-    const sourceUrl = document.getElementById('cloud-source-url').value.trim();
-    if (!sourceUrl) { alert('Please enter a source URL.'); return; }
-
-    const destSP    = document.getElementById('dest-sp-toggle').checked
-        ? document.getElementById('cloud-dest-sp-url').value.trim() : null;
-    const destLocal = document.getElementById('dest-local-toggle').checked
-        ? document.getElementById('cloud-dest-local-dir').value.trim() : null;
-
-    if (!destSP && !destLocal) {
-        alert('Please select at least one destination.');
-        return;
-    }
-
-    document.getElementById('btn-cloud-convert').disabled = true;
-    document.getElementById('btn-cloud-batch').disabled   = true;
-    setCloudStateBadge(null);
-    setCloudProgress(true, 'Resolving cloud file...', 10);
-    clearCloudLog();
-    logCloudLine('Resolving cloud file...');
-
-    try {
-        setCloudProgress(true, 'Downloading cloud file...', 25);
-        logCloudLine('Downloading cloud file...');
-
-        const res = await fetch('/cloud/convert', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                source_url:          sourceUrl,
-                dest_sharepoint_url: destSP,
-                local_output_dir:    destLocal
-            })
-        });
-
-        const data = await res.json().catch(() => ({}));
-
-        if (!res.ok) {
-            const msg = (data && data.detail) ? data.detail : `HTTP ${res.status}`;
-            // Map MIP-related 422s and 408 timeout to UI states.
-            if (res.status === 408 || /2-minute|exceeded.*limit/i.test(msg)) {
-                setCloudStateBadge('reapply-failed');
-                logCloudLine(msg, 'fail');
-            } else if (res.status === 422 && /could not be converted.*Purview|cloud access failed/i.test(msg)) {
-                setCloudStateBadge('protected-denied');
-                logCloudLine(msg, 'fail');
-            } else if (res.status === 422 && /purview|denied|rights|access/i.test(msg)) {
-                setCloudStateBadge('protected-denied');
-                logCloudLine('Access denied by Microsoft Purview policy.', 'fail');
-            } else if (res.status === 422 && /reappl|protection.*could not/i.test(msg)) {
-                setCloudStateBadge('reapply-failed');
-                logCloudLine('Protection could not be reapplied. Upload blocked.', 'fail');
-            } else {
-                logCloudLine('Error: ' + msg, 'fail');
-            }
-            setCloudProgress(false, 'Failed', 100);
-
-            if (data && data.markdown) {
-                openInEditor(
-                    data.markdown,
-                    sourceUrl.split('/').pop().replace(/\.docx$/i, '')
-                );
-                logCloudLine('Partial output opened in editor for review.', 'fail');
-            }
-            return;
-        }
-
-        // Success path. Surface the protected-file workflow when applicable.
-        if (data.protected || data.fallback_used === 'mip') {
-            setCloudStateBadge('protected-allowed');
-            logCloudLine('Cloud access failed — used Microsoft Purview fallback.', 'ok');
-            logCloudLine('Protected file decrypted with your credentials.', 'ok');
-            if (data.label_name) {
-                logCloudLine('Sensitivity label: ' + data.label_name, 'ok');
-            }
-        } else {
-            setCloudStateBadge('normal');
-        }
-
-        setCloudProgress(false, 'Done', 100);
-        if (data.sharepoint_url) logCloudLine('SharePoint: ' + data.sharepoint_url, 'ok');
-        if (data.local_path)     logCloudLine('Local: ' + data.local_path, 'ok');
-        logCloudLine(`Converted in ${data.elapsed_ms}ms`, 'ok');
-
-        if (data.markdown) {
-            openInEditor(
-                data.markdown,
-                (data.filename || 'converted').replace(/\.md$/i, '')
-            );
-        }
-    } catch (err) {
-        logCloudLine('Network error: ' + err.message, 'fail');
-        setCloudProgress(false, 'Failed', 100);
-    } finally {
-        document.getElementById('btn-cloud-convert').disabled = false;
-        document.getElementById('btn-cloud-batch').disabled   = false;
-    }
-}
-
-function openInEditor(markdown, docName) {
-    const editor = document.getElementById('markdown-editor');
-    if (editor) editor.value = markdown;
-    currentFileName = docName;
-    serverSavedPath = null;
-    isServerDoc     = false;
-    if (typeof clearDirty === 'function') clearDirty();
-    if (typeof switchMode === 'function') switchMode('local');
-    document.getElementById('step-upload').classList.add('hidden');
-    document.getElementById('step-workspace').classList.remove('hidden');
-    const folderBtn = document.getElementById('btn-open-folder');
-    if (folderBtn) folderBtn.classList.add('hidden');
-    const editTab = document.getElementById('btn-tab-edit');
-    if (editTab) editTab.click();
-    if (typeof updatePreview === 'function') updatePreview();
-}
-
-// ── Cloud batch convert ───────────────────────────────────────────────────
-function cloudBatch() {
-    const sourceUrl = document.getElementById('cloud-source-url').value.trim();
-    if (!sourceUrl) { alert('Please enter a source folder URL.'); return; }
-
-    const destSP    = document.getElementById('dest-sp-toggle').checked
-        ? document.getElementById('cloud-dest-sp-url').value.trim() : null;
-    const destLocal = document.getElementById('dest-local-toggle').checked
-        ? document.getElementById('cloud-dest-local-dir').value.trim() : null;
-
-    if (!destSP && !destLocal) {
-        alert('Please select at least one destination (SharePoint or local folder).');
-        return;
-    }
-
-    setCloudProgress(true, 'Starting…', 0);
-    clearCloudLog();
-
-    let total = 0, done = 0;
-
-    fetchSSE('/cloud/batch-convert',
-        { source_folder_url: sourceUrl, dest_sharepoint_url: destSP, local_output_dir: destLocal },
-        event => {
-            const d = JSON.parse(event.data);
-            if (d.type === 'start') {
-                total = d.total;
-                setCloudProgress(true, `0 / ${total}`, 0);
-            } else if (d.type === 'file') {
-                done++;
-                const pct = total ? Math.round((done / total) * 100) : 0;
-                const ok  = d.status === 'success';
-                logCloudLine(`[${done}/${total}] ${d.file} — ${ok ? 'ok' : 'FAILED: ' + d.error}`, ok ? 'ok' : 'fail');
-                setCloudProgress(true, `${done} / ${total}`, pct);
-            } else if (d.type === 'summary') {
-                const s = d.succeeded.length, f = Object.keys(d.failed || {}).length;
-                logCloudLine(`Done. ${s} succeeded, ${f} failed.`, f === 0 ? 'ok' : 'fail');
-                setCloudProgress(false, 'Complete', 100);
-            } else if (d.type === 'error') {
-                logCloudLine('Error: ' + d.message, 'fail');
-                setCloudProgress(false, 'Failed', 100);
-            }
-        },
-        err => {
-            if (err) { logCloudLine('Connection error: ' + err.message, 'fail'); setCloudProgress(false, 'Failed', 100); }
-        }
-    );
-}
-
-// ── Progress helpers ──────────────────────────────────────────────────────
-function setCloudProgress(visible, label, pct) {
-    const wrap = document.getElementById('cloud-progress');
-    wrap.classList.toggle('hidden', !visible);
-    document.getElementById('progress-label').textContent = label;
-    document.getElementById('progress-pct').textContent   = pct + '%';
-    document.getElementById('progress-fill').style.width  = pct + '%';
-}
-function logCloudLine(text, cls) {
-    const log = document.getElementById('progress-log');
-    const div = document.createElement('div');
-    div.textContent = text;
-    if (cls) div.className = cls;
-    log.appendChild(div);
-    log.scrollTop = log.scrollHeight;
-}
-function clearCloudLog() {
-    document.getElementById('progress-log').innerHTML = '';
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
