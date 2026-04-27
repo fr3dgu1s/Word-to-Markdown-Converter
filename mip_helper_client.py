@@ -37,6 +37,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+from paths import MIP_HELPER_PATH, MIP_HELPER_ROOT, TEMP_PROTECTED
+
 
 logger = logging.getLogger("wordtomd.mip")
 
@@ -62,28 +64,45 @@ class MipMetadata:
 
 
 def _resolve_helper_path() -> str:
-    explicit = os.environ.get("MIP_HELPER_PATH")
-    if explicit and os.path.exists(explicit):
-        return explicit
+    """Locate MipHelper.exe.
 
-    helper_dir = os.environ.get("MIP_HELPER_DIR")
-    if helper_dir:
-        candidate = os.path.join(helper_dir, "MipHelper.exe")
-        if os.path.exists(candidate):
-            return candidate
+    Resolution order:
+      1. MIP_HELPER_PATH (env / .env, default ``C:/temp/W2MD/MipHelper/MipHelper.exe``).
+      2. ``MIP_HELPER_ROOT/MipHelper.exe`` (default ``C:/temp/W2MD/MipHelper``).
+      3. Repo-relative published helper:
+         ``MipHelper/bin/Release/net8.0/win-x64/publish/MipHelper.exe`` (or non-RID variant).
+      4. If only the repo-relative helper exists, copy it to MIP_HELPER_ROOT so
+         subsequent calls find it via step 1/2 — keeps everything portable.
+    """
+    if MIP_HELPER_PATH.exists():
+        return str(MIP_HELPER_PATH)
 
-    # Fall back to repo-local build output.
+    central = MIP_HELPER_ROOT / "MipHelper.exe"
+    if central.exists():
+        return str(central)
+
     repo_root = Path(__file__).resolve().parent
-    for candidate in [
+    repo_candidates = [
+        repo_root / "MipHelper" / "bin" / "Release" / "net8.0" / "win-x64" / "publish" / "MipHelper.exe",
+        repo_root / "MipHelper" / "bin" / "Release" / "net8.0" / "publish" / "MipHelper.exe",
         repo_root / "MipHelper" / "bin" / "Release" / "net8.0" / "MipHelper.exe",
         repo_root / "MipHelper" / "bin" / "Debug" / "net8.0" / "MipHelper.exe",
-        repo_root / "MipHelper" / "MipHelper.exe",
-    ]:
+    ]
+    for candidate in repo_candidates:
         if candidate.exists():
-            return str(candidate)
+            try:
+                MIP_HELPER_ROOT.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(candidate, central)
+                logger.info(f"[MIP] copied helper to {central}")
+                return str(central)
+            except Exception as exc:
+                logger.warning(f"[MIP] could not copy helper to {central}: {exc}")
+                return str(candidate)
 
     raise MipHelperError(
-        "MipHelper.exe not found. Set MIP_HELPER_PATH or build the C# helper in /MipHelper."
+        "MipHelper.exe was not found. Run scripts/setup-windows.ps1 or "
+        "publish the helper and copy it to "
+        f"{(MIP_HELPER_ROOT / 'MipHelper.exe').as_posix()}."
     )
 
 
@@ -117,7 +136,7 @@ def inspect_file(input_path: str | Path) -> MipMetadata:
     if not src.exists():
         raise MipHelperError(f"Input file not found: {src}")
 
-    metadata_path = Path(tempfile.gettempdir()) / f"mip-meta-{uuid.uuid4().hex}.json"
+    metadata_path = TEMP_PROTECTED / f"mip-meta-{uuid.uuid4().hex}.json"
     rc, _stdout, stderr = _run_helper(
         ["inspect", "--input", str(src), "--metadata", str(metadata_path)]
     )
@@ -157,7 +176,7 @@ def unprotect_file(
     meta = Path(metadata_path)
     upn = user_upn or os.environ.get("MIP_USER_UPN", "")
 
-    work_dir = Path(tempfile.mkdtemp(prefix="mip-work-"))
+    work_dir = Path(tempfile.mkdtemp(prefix="mip-work-", dir=str(TEMP_PROTECTED)))
     output_path = work_dir / f"{src.stem}-working.docx"
 
     args = [
@@ -207,7 +226,7 @@ def fetch_and_unprotect_url(
     """
     upn = user_upn or os.environ.get("MIP_USER_UPN", "")
 
-    work_dir = Path(tempfile.mkdtemp(prefix="mip-fetch-"))
+    work_dir = Path(tempfile.mkdtemp(prefix="mip-fetch-", dir=str(TEMP_PROTECTED)))
     output_path = work_dir / "fetched-working.docx"
 
     args = [
@@ -252,7 +271,7 @@ def reapply_protection(
     meta = Path(metadata_path)
     upn = user_upn or os.environ.get("MIP_USER_UPN", "")
 
-    work_dir = Path(tempfile.mkdtemp(prefix="mip-final-"))
+    work_dir = Path(tempfile.mkdtemp(prefix="mip-final-", dir=str(TEMP_PROTECTED)))
     output_path = work_dir / f"{src.stem}-protected.docx"
 
     args = [
@@ -298,7 +317,7 @@ def cleanup_paths(*paths: str | Path | None) -> None:
                 shutil.rmtree(path, ignore_errors=True)
 
             parent = path.parent
-            if parent.exists() and parent.name.startswith(("mip-work-", "mip-final-")):
+            if parent.exists() and parent.name.startswith(("mip-work-", "mip-final-", "mip-fetch-", "mip-src-")):
                 shutil.rmtree(parent, ignore_errors=True)
         except Exception as exc:
             logger.warning(f"[MIP] cleanup failed for {path}: {exc}")

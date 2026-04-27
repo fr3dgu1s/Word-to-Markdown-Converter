@@ -690,10 +690,17 @@ def decrypt_and_get_temp_path(protected_docx_path: str) -> str:
             "Install it with `pip install pywin32` and ensure Microsoft Word is installed."
         )
 
+    try:
+        from paths import TEMP_PROTECTED  # noqa: PLC0415
+        _decrypt_dir = str(TEMP_PROTECTED)
+    except Exception:
+        _decrypt_dir = None
+
     handle = tempfile.NamedTemporaryFile(
         delete=False,
         prefix=f"{source_path.stem}-decrypted-",
         suffix=".docx",
+        dir=_decrypt_dir,
     )
     handle.close()
     temp_output_path = Path(handle.name)

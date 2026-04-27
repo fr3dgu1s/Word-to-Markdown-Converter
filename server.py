@@ -19,6 +19,16 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
 
 from logging_config import setup_logging
+from paths import (
+    OUTPUTS_ROOT,
+    OUTPUTS_SINGLE,
+    OUTPUTS_BATCH,
+    OUTPUTS_IMAGES,
+    TEMP_ROOT,
+    TEMP_CLOUD,
+    TEMP_PROTECTED,
+    LOGS_ROOT,
+)
 from protected_file_access import (
     convert_docx_with_docling_fallback,
     ProtectedFileAccessError,
@@ -99,13 +109,11 @@ def _get_converter():
 # ---------------------------------------------------------------------------
 # Directory config
 # ---------------------------------------------------------------------------
+# Runtime folders are created and validated by paths.py at import time.
+# Local helpers below alias the canonical names for backwards compatibility.
 
-OUTPUTS_ROOT = Path(__file__).resolve().parent / "Outputs"
-GLOBAL_IMAGES_DIR = OUTPUTS_ROOT / "Images"
-LOGS_DIR = Path(__file__).resolve().parent / "logs"
-
-OUTPUTS_ROOT.mkdir(parents=True, exist_ok=True)
-GLOBAL_IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+GLOBAL_IMAGES_DIR = OUTPUTS_IMAGES
+LOGS_DIR = LOGS_ROOT
 
 
 def sanitize_name(name: str) -> str:
@@ -120,7 +128,7 @@ def get_unique_safe_name(base_name: str) -> str:
     safe_base = sanitize_name(base_name) or "document"
     safe_name = safe_base
     counter = 2
-    while (OUTPUTS_ROOT / f"{safe_name}.md").exists() or (GLOBAL_IMAGES_DIR / safe_name).exists():
+    while (OUTPUTS_SINGLE / f"{safe_name}.md").exists() or (GLOBAL_IMAGES_DIR / safe_name).exists():
         safe_name = f"{safe_base}-{counter}"
         counter += 1
     return safe_name
@@ -152,18 +160,20 @@ def convert_file_to_markdown(
     upload_file: UploadFile,
     *,
     include_markdown: bool = True,
+    output_dir: Path = OUTPUTS_SINGLE,
 ) -> dict:
     original_name = Path(upload_file.filename or "document").stem
     safe_name = get_unique_safe_name(original_name)
     spec_image_folder = GLOBAL_IMAGES_DIR / safe_name
     spec_image_folder.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     t0 = time.perf_counter()
     logger.info(f"[CONVERT] start | file={upload_file.filename} | mode=local")
 
     tmp_path: Optional[Path] = None
     try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".docx", dir=str(TEMP_ROOT)) as tmp:
             shutil.copyfileobj(upload_file.file, tmp)
             tmp_path = Path(tmp.name)
 
@@ -190,7 +200,7 @@ def convert_file_to_markdown(
 
         final_markdown = convert_docx_with_docling_fallback(str(tmp_path), _docling_to_markdown)
 
-        md_file_path = OUTPUTS_ROOT / f"{safe_name}.md"
+        md_file_path = output_dir / f"{safe_name}.md"
         with open(md_file_path, "w", encoding="utf-8") as f:
             f.write(final_markdown)
 
@@ -239,7 +249,7 @@ async def protected_file_check(file: UploadFile = File(...)):
 
     tmp_path: Optional[Path] = None
     try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".docx", dir=str(TEMP_ROOT)) as tmp:
             shutil.copyfileobj(file.file, tmp)
             tmp_path = Path(tmp.name)
         result = test_protected_file_access(tmp_path)
@@ -283,7 +293,7 @@ async def shutdown_app():
 async def save_changes(data: dict = Body(...)):
     doc_name = data.get("doc_name")
     content = data.get("markdown")
-    file_path = OUTPUTS_ROOT / f"{doc_name}.md"
+    file_path = OUTPUTS_SINGLE / f"{doc_name}.md"
     with open(file_path, "w", encoding="utf-8") as f:
         f.write(content)
     return {"status": "saved"}
@@ -324,7 +334,7 @@ async def convert_documents_batch(files: List[UploadFile] = File(...)):
             skipped.append({"file": filename, "reason": "Only .docx files are supported for batch conversion."})
             continue
         try:
-            item = convert_file_to_markdown(upload_file, include_markdown=False)
+            item = convert_file_to_markdown(upload_file, include_markdown=False, output_dir=OUTPUTS_BATCH)
             converted.append({"file": filename, "doc_name": item["doc_name"], "output_file": item["output_file"]})
         except Exception as exc:
             logger.exception(f"Unhandled error in /api/convert-batch for {filename}: {exc}")
@@ -334,7 +344,7 @@ async def convert_documents_batch(files: List[UploadFile] = File(...)):
         raise HTTPException(status_code=500, detail={"message": "Batch conversion failed for all eligible files.", "failed": failed})
 
     return {
-        "folder_created": str(OUTPUTS_ROOT),
+        "folder_created": str(OUTPUTS_BATCH),
         "converted_count": len(converted),
         "skipped_count": len(skipped),
         "failed_count": len(failed),
@@ -657,7 +667,7 @@ async def cloud_convert(data: dict = Body(...)):
                         raise HTTPException(status_code=422, detail=BOTH_FAILED_MSG)
                 else:
                     # We have protected bytes locally — use inspect/unprotect.
-                    tmp_dir = Path(tempfile.mkdtemp(prefix="mip-src-"))
+                    tmp_dir = Path(tempfile.mkdtemp(prefix="mip-src-", dir=str(TEMP_PROTECTED)))
                     cleanup_paths.append(tmp_dir)
                     tmp_input = tmp_dir / "source.docx"
                     tmp_input.write_bytes(file_bytes or b"")

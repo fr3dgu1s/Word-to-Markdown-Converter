@@ -60,7 +60,12 @@ def is_protected(file_bytes: bytes) -> bool:
 
 def _docx_bytes_to_markdown(file_bytes: bytes) -> str:
     """Write bytes to a temp .docx, run Docling, return Markdown string."""
-    tmp_dir = tempfile.mkdtemp(prefix="cloud_conv_")
+    try:
+        from paths import TEMP_CLOUD  # noqa: PLC0415
+        cloud_dir = str(TEMP_CLOUD)
+    except Exception:
+        cloud_dir = None
+    tmp_dir = tempfile.mkdtemp(prefix="cloud_conv_", dir=cloud_dir)
     try:
         tmp_path = Path(tmp_dir) / "input.docx"
         tmp_path.write_bytes(file_bytes)

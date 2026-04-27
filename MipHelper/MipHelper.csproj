@@ -23,4 +23,26 @@
     <PackageReference Include="System.Text.Json" Version="8.0.5" />
   </ItemGroup>
 
+  <!--
+    Post-publish target: copy the published MipHelper.exe to the portable
+    runtime location so the Python orchestrator can find it without any
+    user-specific environment variable.
+
+    Override the destination by passing -p:W2MDHelperRoot=... to dotnet publish.
+  -->
+  <PropertyGroup>
+    <W2MDHelperRoot Condition="'$(W2MDHelperRoot)' == ''">C:/temp/W2MD/MipHelper</W2MDHelperRoot>
+  </PropertyGroup>
+
+  <Target Name="CopyToW2MDHelperRoot" AfterTargets="Publish">
+    <MakeDir Directories="$(W2MDHelperRoot)" />
+    <Copy SourceFiles="$(PublishDir)MipHelper.exe"
+          DestinationFolder="$(W2MDHelperRoot)"
+          SkipUnchangedFiles="false"
+          Condition="Exists('$(PublishDir)MipHelper.exe')" />
+    <Message Importance="high"
+             Text="MipHelper.exe copied to $(W2MDHelperRoot)\MipHelper.exe"
+             Condition="Exists('$(PublishDir)MipHelper.exe')" />
+  </Target>
+
 </Project>

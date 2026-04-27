@@ -6,3 +6,4 @@ docling
 msal
 requests
 pywin32
+python-dotenv

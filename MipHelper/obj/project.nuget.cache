@@ -1,0 +1,37 @@
+{
+  "version": 2,
+  "dgSpecHash": "q9V9U/je/3s=",
+  "success": true,
+  "projectFilePath": "C:\\Users\\fresantos\\Repos\\Word-to-Markdown-Converter\\MipHelper\\MipHelper.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\fresantos\\.nuget\\packages\\microsoft.identity.client\\4.66.2\\microsoft.identity.client.4.66.2.nupkg.sha512",
+    "C:\\Users\\fresantos\\.nuget\\packages\\microsoft.identitymodel.abstractions\\6.35.0\\microsoft.identitymodel.abstractions.6.35.0.nupkg.sha512",
+    "C:\\Users\\fresantos\\.nuget\\packages\\microsoft.informationprotection.file\\1.16.149\\microsoft.informationprotection.file.1.16.149.nupkg.sha512",
+    "C:\\Users\\fresantos\\.nuget\\packages\\system.commandline\\2.0.0-beta4.22272.1\\system.commandline.2.0.0-beta4.22272.1.nupkg.sha512",
+    "C:\\Users\\fresantos\\.nuget\\packages\\system.diagnostics.diagnosticsource\\6.0.1\\system.diagnostics.diagnosticsource.6.0.1.nupkg.sha512",
+    "C:\\Users\\fresantos\\.nuget\\packages\\system.runtime.compilerservices.unsafe\\6.0.0\\system.runtime.compilerservices.unsafe.6.0.0.nupkg.sha512",
+    "C:\\Users\\fresantos\\.nuget\\packages\\system.text.json\\8.0.5\\system.text.json.8.0.5.nupkg.sha512",
+    "C:\\Users\\fresantos\\.nuget\\packages\\microsoft.netcore.app.ref\\8.0.26\\microsoft.netcore.app.ref.8.0.26.nupkg.sha512",
+    "C:\\Users\\fresantos\\.nuget\\packages\\microsoft.netcore.app.runtime.win-x64\\8.0.26\\microsoft.netcore.app.runtime.win-x64.8.0.26.nupkg.sha512",
+    "C:\\Users\\fresantos\\.nuget\\packages\\microsoft.windowsdesktop.app.ref\\8.0.26\\microsoft.windowsdesktop.app.ref.8.0.26.nupkg.sha512",
+    "C:\\Users\\fresantos\\.nuget\\packages\\microsoft.windowsdesktop.app.runtime.win-x64\\8.0.26\\microsoft.windowsdesktop.app.runtime.win-x64.8.0.26.nupkg.sha512",
+    "C:\\Users\\fresantos\\.nuget\\packages\\microsoft.aspnetcore.app.ref\\8.0.26\\microsoft.aspnetcore.app.ref.8.0.26.nupkg.sha512",
+    "C:\\Users\\fresantos\\.nuget\\packages\\microsoft.aspnetcore.app.runtime.win-x64\\8.0.26\\microsoft.aspnetcore.app.runtime.win-x64.8.0.26.nupkg.sha512",
+    "C:\\Users\\fresantos\\.nuget\\packages\\microsoft.netcore.app.host.win-x64\\8.0.26\\microsoft.netcore.app.host.win-x64.8.0.26.nupkg.sha512"
+  ],
+  "logs": [
+    {
+      "code": "NU1603",
+      "level": "Warning",
+      "message": "MipHelper depends on Microsoft.InformationProtection.File (>= 1.16.137) but Microsoft.InformationProtection.File 1.16.137 was not found. Microsoft.InformationProtection.File 1.16.149 was resolved instead.",
+      "projectPath": "C:\\Users\\fresantos\\Repos\\Word-to-Markdown-Converter\\MipHelper\\MipHelper.csproj",
+      "warningLevel": 1,
+      "filePath": "C:\\Users\\fresantos\\Repos\\Word-to-Markdown-Converter\\MipHelper\\MipHelper.csproj",
+      "libraryId": "Microsoft.InformationProtection.File",
+      "targetGraphs": [
+        "net8.0",
+        "net8.0/win-x64"
+      ]
+    }
+  ]
+}

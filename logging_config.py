@@ -2,12 +2,11 @@ import logging
 import os
 from logging.handlers import RotatingFileHandler
 
-LOGS_DIR = os.path.join(os.path.dirname(__file__), "logs")
-os.makedirs(LOGS_DIR, exist_ok=True)
+from paths import LOGS_ROOT
 
 
 def setup_logging():
-    log_path = os.path.join(LOGS_DIR, "app.log")
+    log_path = os.path.join(str(LOGS_ROOT), "app.log")
 
     formatter = logging.Formatter(
         fmt="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
