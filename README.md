@@ -45,15 +45,13 @@ per-user paths. Folders are created automatically on first run.
 
 | Path | Purpose |
 | --- | --- |
-| `C:/temp/W2MD/Outputs/Single` | Single-file conversions |
-| `C:/temp/W2MD/Outputs/Batch`  | Batch conversion outputs |
-| `C:/temp/W2MD/Outputs/Images` | Extracted images |
+| `C:/temp/W2MD/Outputs`        | All converted Markdown (single + batch) |
+| `C:/temp/W2MD/Outputs/Images` | Extracted images (one sub-folder per document) |
 | `C:/temp/W2MD/Temp`           | Short-lived upload scratch space |
 | `C:/temp/W2MD/Logs`           | `app.log` and rotated history |
 
 Override any of these by editing [.env](.env) (`APP_DATA_ROOT`,
-`OUTPUTS_ROOT`, `SINGLE_OUTPUT_ROOT`, `BATCH_OUTPUT_ROOT`, `IMAGES_ROOT`,
-`TEMP_ROOT`, `LOGS_ROOT`).
+`OUTPUTS_ROOT`, `IMAGES_ROOT`, `TEMP_ROOT`, `LOGS_ROOT`).
 
 ## Single file conversion
 
@@ -62,7 +60,7 @@ Override any of these by editing [.env](.env) (`APP_DATA_ROOT`,
 3. Edit using the toolbar (headings, bold, italics, lists, callouts,
    code blocks, tables, etc.).
 4. Switch to **Visual Preview** to render the Markdown with images.
-5. Click **Save** to update `C:/temp/W2MD/Outputs/Single/<doc-name>.md`,
+5. Click **Save** to update `C:/temp/W2MD/Outputs/<doc-name>.md`,
    or **Copy** to copy Markdown to the clipboard.
 6. Click **Open Folder** to reveal the file in Windows Explorer.
 
@@ -72,8 +70,12 @@ Override any of these by editing [.env](.env) (`APP_DATA_ROOT`,
    **Batch Convert Folder** (entire folder).
 2. The app converts every `.docx`. It skips other file types and continues
    even if individual files fail.
-3. A summary shows how many files succeeded, failed, and were skipped.
-4. Outputs land in `C:/temp/W2MD/Outputs/Batch`.
+3. A summary shows how many files succeeded, how many failed, and **why
+   each failed file failed**.
+4. Outputs land directly in `C:/temp/W2MD/Outputs`. Batch outputs include
+   `-BATCH` in the filename — e.g. `Security Spec.docx` becomes
+   `Security Spec-BATCH.md` — to flag that the file still needs
+   review/editing before being treated as final.
 
 ## Stopping the server
 

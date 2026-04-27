@@ -2,15 +2,15 @@
 Word-to-Markdown Converter — local FastAPI server.
 
 Endpoints:
-    GET  /                         Static index.html
-    GET  /health                   Liveness probe
-    GET  /api/status               Docling readiness
-    POST /api/convert              Single-file conversion
-    POST /api/convert-batch        Batch conversion
-    POST /api/save-changes         Persist edited Markdown
-    GET  /api/open-folder          Open the Outputs folder in Explorer
-    POST /api/shutdown             Stop the server
-    GET  /logs/latest              Tail app.log
+    GET    /                       Static index.html
+    GET    /health                 Liveness probe
+    GET    /api/status             Docling readiness
+    POST   /api/convert            Single-file conversion
+    POST   /api/convert-batch      Batch conversion
+    POST   /api/save-changes       Persist edited Markdown
+    GET    /api/open-folder        Open the Outputs folder in Explorer
+    POST   /api/shutdown           Stop the server
+    GET    /logs/latest            Tail app.log
     DELETE /logs/latest            Truncate app.log
 """
 
@@ -31,14 +31,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 
 from logging_config import setup_logging
-from paths import (
-    OUTPUTS_ROOT,
-    SINGLE_OUTPUT_ROOT,
-    BATCH_OUTPUT_ROOT,
-    IMAGES_ROOT,
-    TEMP_ROOT,
-    LOGS_ROOT,
-)
+from paths import OUTPUTS_ROOT, IMAGES_ROOT, TEMP_ROOT, LOGS_ROOT
 
 logger = setup_logging()
 
@@ -102,26 +95,57 @@ def _get_converter():
 # Naming helpers
 # ---------------------------------------------------------------------------
 
-def sanitize_name(name: str) -> str:
-    clean = name.lower()
-    clean = re.sub(r"[^a-z0-9]", "-", clean)
-    clean = re.sub(r"-+", "-", clean)
-    return clean.strip("-")
+_WINDOWS_FORBIDDEN = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
 
-def get_unique_safe_name(base_name: str) -> str:
-    """Avoid collisions when batch-converting files with the same stem."""
-    safe_base = sanitize_name(base_name) or "document"
-    safe_name = safe_base
+def safe_md_basename(stem: str) -> str:
+    """Sanitise a filename stem to be safe on Windows while preserving spaces/dots."""
+    cleaned = _WINDOWS_FORBIDDEN.sub("", stem).strip().rstrip(".")
+    return cleaned or "document"
+
+
+def safe_image_dir(stem: str) -> str:
+    """Lowercase, hyphen-separated stem used as the per-document image folder name."""
+    clean = re.sub(r"[^a-zA-Z0-9]+", "-", stem).strip("-").lower()
+    return clean or "document"
+
+
+def batch_output_name(filename: str) -> str:
+    """Return the batch output filename for an input .docx (preserves original stem)."""
+    stem = Path(filename).stem
+    return f"{safe_md_basename(stem)}-BATCH.md"
+
+
+def single_output_name(filename: str) -> str:
+    stem = Path(filename).stem
+    return f"{safe_md_basename(stem)}.md"
+
+
+def _unique_path(folder: Path, filename: str) -> Path:
+    """If ``folder/filename`` already exists, append ``-2``, ``-3``, … to the stem."""
+    candidate = folder / filename
+    if not candidate.exists():
+        return candidate
+    stem = Path(filename).stem
+    suffix = Path(filename).suffix
     counter = 2
-    while (
-        (SINGLE_OUTPUT_ROOT / f"{safe_name}.md").exists()
-        or (BATCH_OUTPUT_ROOT / f"{safe_name}.md").exists()
-        or (IMAGES_ROOT / safe_name).exists()
-    ):
-        safe_name = f"{safe_base}-{counter}"
+    while True:
+        candidate = folder / f"{stem}-{counter}{suffix}"
+        if not candidate.exists():
+            return candidate
         counter += 1
-    return safe_name
+
+
+def _unique_image_dir(stem_slug: str) -> Path:
+    folder = IMAGES_ROOT / stem_slug
+    if not folder.exists():
+        return folder
+    counter = 2
+    while True:
+        candidate = IMAGES_ROOT / f"{stem_slug}-{counter}"
+        if not candidate.exists():
+            return candidate
+        counter += 1
 
 
 # ---------------------------------------------------------------------------
@@ -153,18 +177,24 @@ async def log_requests(request: Request, call_next):
 def convert_file_to_markdown(
     upload_file: UploadFile,
     *,
+    output_filename: str,
     include_markdown: bool = True,
-    output_dir: Path = SINGLE_OUTPUT_ROOT,
 ) -> dict:
-    """Convert one uploaded ``.docx`` file to Markdown using Docling."""
-    original_name = Path(upload_file.filename or "document").stem
-    safe_name = get_unique_safe_name(original_name)
-    image_folder = IMAGES_ROOT / safe_name
+    """Convert one uploaded ``.docx`` file to Markdown using Docling.
+
+    Always writes the resulting ``.md`` directly under :data:`OUTPUTS_ROOT`
+    using ``output_filename`` (e.g. ``MyDoc.md`` or ``MyDoc-BATCH.md``).
+    Extracted images go to ``OUTPUTS_ROOT/Images/<slug>/``.
+    """
+    original_stem = Path(upload_file.filename or "document").stem
+    image_slug = safe_image_dir(original_stem)
+    image_folder = _unique_image_dir(image_slug)
     image_folder.mkdir(parents=True, exist_ok=True)
-    output_dir.mkdir(parents=True, exist_ok=True)
+
+    md_file_path = _unique_path(OUTPUTS_ROOT, output_filename)
 
     t0 = time.perf_counter()
-    logger.info(f"[CONVERT] start | file={upload_file.filename}")
+    logger.info(f"[CONVERT] start | file={upload_file.filename} -> {md_file_path.name}")
 
     tmp_path: Optional[Path] = None
     try:
@@ -187,17 +217,20 @@ def convert_file_to_markdown(
         raw_markdown = conv_res.document.export_to_markdown(image_placeholder="IMAGE_TOKEN")
         final_markdown = raw_markdown
         for i in range(1, picture_counter + 1):
-            tag = f"![spec-image](Images/{safe_name}/image_{i}.png)"
+            tag = f"![spec-image](Images/{image_folder.name}/image_{i}.png)"
             final_markdown = final_markdown.replace("IMAGE_TOKEN", tag, 1)
 
-        md_file_path = output_dir / f"{safe_name}.md"
         with open(md_file_path, "w", encoding="utf-8") as f:
             f.write(final_markdown)
 
         elapsed_ms = int((time.perf_counter() - t0) * 1000)
         logger.info(f"[CONVERT] done  | file={upload_file.filename} | elapsed={elapsed_ms}ms")
 
-        result = {"doc_name": safe_name, "output_file": str(md_file_path)}
+        result = {
+            "doc_name": md_file_path.stem,
+            "output_file": str(md_file_path),
+            "image_dir": image_folder.name,
+        }
         if include_markdown:
             result["markdown"] = final_markdown
         return result
@@ -258,15 +291,26 @@ async def shutdown_app():
 
 @app.post("/api/save-changes")
 async def save_changes(data: dict = Body(...)):
+    output_file = data.get("output_file")
     doc_name = data.get("doc_name")
     content = data.get("markdown", "")
-    if not doc_name:
-        raise HTTPException(status_code=400, detail="doc_name is required.")
-    file_path = SINGLE_OUTPUT_ROOT / f"{doc_name}.md"
-    file_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(file_path, "w", encoding="utf-8") as f:
+
+    if output_file:
+        target = Path(output_file)
+        # Pin the write inside OUTPUTS_ROOT to prevent path traversal.
+        try:
+            target.resolve().relative_to(OUTPUTS_ROOT.resolve())
+        except ValueError:
+            raise HTTPException(status_code=400, detail="output_file must be inside Outputs.")
+    elif doc_name:
+        target = OUTPUTS_ROOT / f"{safe_md_basename(doc_name)}.md"
+    else:
+        raise HTTPException(status_code=400, detail="output_file or doc_name is required.")
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with open(target, "w", encoding="utf-8") as f:
         f.write(content)
-    return {"status": "saved", "path": str(file_path)}
+    return {"status": "saved", "path": str(target)}
 
 
 # ---------------------------------------------------------------------------
@@ -279,12 +323,16 @@ async def convert_document(file: UploadFile = File(...)):
     if not filename.lower().endswith(".docx"):
         raise HTTPException(status_code=400, detail="Only .docx files are supported.")
     try:
-        result = convert_file_to_markdown(file, include_markdown=True)
+        result = convert_file_to_markdown(
+            file,
+            output_filename=single_output_name(filename),
+            include_markdown=True,
+        )
         return {
             "markdown": result["markdown"],
             "doc_name": result["doc_name"],
             "output_file": result["output_file"],
-            "folder_created": str(SINGLE_OUTPUT_ROOT),
+            "output_dir": str(OUTPUTS_ROOT),
         }
     except HTTPException:
         raise
@@ -298,44 +346,40 @@ async def convert_documents_batch(files: List[UploadFile] = File(...)):
     if not files:
         raise HTTPException(status_code=400, detail="No files were provided.")
 
-    converted: list[dict] = []
-    skipped: list[dict] = []
-    failed: list[dict] = []
+    converted_files: list[dict] = []
+    failed_files: list[dict] = []
 
     for upload_file in files:
         filename = upload_file.filename or ""
         if not filename.lower().endswith(".docx"):
-            skipped.append({"file": filename, "reason": "Only .docx files are supported for batch conversion."})
+            failed_files.append({
+                "input": filename,
+                "error": "Unsupported file type (only .docx is accepted)",
+            })
             continue
         try:
             item = convert_file_to_markdown(
                 upload_file,
+                output_filename=batch_output_name(filename),
                 include_markdown=False,
-                output_dir=BATCH_OUTPUT_ROOT,
             )
-            converted.append({
-                "file": filename,
-                "doc_name": item["doc_name"],
-                "output_file": item["output_file"],
+            converted_files.append({
+                "input": filename,
+                "output": item["output_file"],
             })
         except Exception as exc:
             logger.exception(f"Unhandled error in /api/convert-batch for {filename}: {exc}")
-            failed.append({"file": filename, "error": str(exc)})
-
-    if not converted and not skipped and failed:
-        raise HTTPException(
-            status_code=500,
-            detail={"message": "Batch conversion failed for all eligible files.", "failed": failed},
-        )
+            failed_files.append({
+                "input": filename,
+                "error": str(exc) or "Document could not be read",
+            })
 
     return {
-        "folder_created": str(BATCH_OUTPUT_ROOT),
-        "converted_count": len(converted),
-        "skipped_count": len(skipped),
-        "failed_count": len(failed),
-        "converted": converted,
-        "skipped": skipped,
-        "failed": failed,
+        "output_dir": str(OUTPUTS_ROOT),
+        "converted_count": len(converted_files),
+        "failed_count": len(failed_files),
+        "converted_files": converted_files,
+        "failed_files": failed_files,
     }
 
 

@@ -1,16 +1,13 @@
 """
 Central path configuration for the Word-to-Markdown app.
 
-All runtime locations (outputs, temp, logs) are routed through environment
-variables loaded from a local ``.env`` file. The defaults keep everything
-portable under ``C:/temp/W2MD`` so the app never depends on per-user paths
-like ``C:\\Users\\<name>\\...``.
+All runtime locations are routed through environment variables loaded from a
+local ``.env`` file. The defaults keep everything portable under
+``C:/temp/W2MD`` so the app never depends on per-user paths.
 
 Layout (defaults):
     C:/temp/W2MD/
-        Outputs/
-            Single/        single-file conversions
-            Batch/         batch conversion outputs
+        Outputs/           all converted Markdown (single + batch)
             Images/        images extracted by Docling
         Temp/              short-lived per-request scratch files
         Logs/              app.log + rotated history
@@ -25,7 +22,6 @@ try:
     from dotenv import load_dotenv  # type: ignore
     load_dotenv()
 except ImportError:
-    # python-dotenv is recommended but not strictly required at import time.
     pass
 
 
@@ -38,25 +34,14 @@ def _path_from_env(name: str, default: Path) -> Path:
 
 APP_DATA_ROOT: Path = _path_from_env("APP_DATA_ROOT", Path("C:/temp/W2MD"))
 OUTPUTS_ROOT: Path = _path_from_env("OUTPUTS_ROOT", APP_DATA_ROOT / "Outputs")
+IMAGES_ROOT: Path = _path_from_env("IMAGES_ROOT", OUTPUTS_ROOT / "Images")
 TEMP_ROOT: Path = _path_from_env("TEMP_ROOT", APP_DATA_ROOT / "Temp")
 LOGS_ROOT: Path = _path_from_env("LOGS_ROOT", APP_DATA_ROOT / "Logs")
-
-# Conventional sub-folders (independently overridable).
-SINGLE_OUTPUT_ROOT: Path = _path_from_env("SINGLE_OUTPUT_ROOT", OUTPUTS_ROOT / "Single")
-BATCH_OUTPUT_ROOT: Path = _path_from_env("BATCH_OUTPUT_ROOT", OUTPUTS_ROOT / "Batch")
-IMAGES_ROOT: Path = _path_from_env("IMAGES_ROOT", OUTPUTS_ROOT / "Images")
-
-# Backwards-compatible aliases used elsewhere in the app.
-OUTPUTS_SINGLE = SINGLE_OUTPUT_ROOT
-OUTPUTS_BATCH = BATCH_OUTPUT_ROOT
-OUTPUTS_IMAGES = IMAGES_ROOT
 
 
 _REQUIRED_DIRS = (
     APP_DATA_ROOT,
     OUTPUTS_ROOT,
-    SINGLE_OUTPUT_ROOT,
-    BATCH_OUTPUT_ROOT,
     IMAGES_ROOT,
     TEMP_ROOT,
     LOGS_ROOT,
