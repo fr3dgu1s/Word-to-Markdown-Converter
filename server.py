@@ -16,7 +16,7 @@ from typing import List, Optional
 from fastapi import FastAPI, Request, UploadFile, File, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
 
 from logging_config import setup_logging
 from protected_file_access import (
@@ -32,6 +32,19 @@ from cloud_converter import batch_convert_cloud
 logger = setup_logging()
 
 app = FastAPI()
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    import traceback
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": str(exc),
+            "traceback": traceback.format_exc(),
+            "path": str(request.url),
+        },
+    )
 
 # ---------------------------------------------------------------------------
 # Docling is loaded lazily in a background thread so the HTTP server is
@@ -392,42 +405,126 @@ async def check_protection(file: UploadFile = File(...)):
 # Cloud mode — auth endpoints
 # ---------------------------------------------------------------------------
 
+@app.get("/auth/debug")
+def auth_debug():
+    import shutil, os, subprocess, traceback
+    try:
+        return {
+            "az_which": shutil.which("az"),
+            "az_cmd_which": shutil.which("az.cmd"),
+            "PATH": os.environ.get("PATH", ""),
+            "cwd": os.getcwd(),
+        }
+    except Exception as e:
+        return {"error": str(e), "traceback": traceback.format_exc()}
+
 @app.get("/auth/status")
 def auth_status():
-    client = GraphAuthClient()
-    authenticated = client.is_authenticated()
-    account = client.get_account()
-    logger.info(f"[AUTH] status check | authenticated={authenticated} | account={account}")
-    return {"authenticated": authenticated, "account": account}
+    import shutil, subprocess, json, os, traceback
+    try:
+        # Resolve az — check PATH and known Windows install locations
+        cmd = (
+            shutil.which("az")
+            or shutil.which("az.cmd")
+            or (r"C:\Program Files (x86)\Microsoft SDKs\Azure\CLI2\wbin\az.cmd" if os.path.exists(r"C:\Program Files (x86)\Microsoft SDKs\Azure\CLI2\wbin\az.cmd") else None)
+            or (r"C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin\az.cmd" if os.path.exists(r"C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin\az.cmd") else None)
+        )
+        if not cmd:
+            return {
+                "authenticated": False,
+                "account": None,
+                "error": "az_not_found",
+            }
+
+        # Pass extended PATH so subprocess can find az dependencies
+        env = {
+            **os.environ,
+            "PATH": os.environ.get("PATH", "")
+            + r";C:\Program Files (x86)\Microsoft SDKs\Azure\CLI2\wbin"
+            + r";C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin",
+        }
+
+        result = subprocess.run(
+            [cmd, "account", "show"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            env=env,
+        )
+
+        if result.returncode != 0:
+            return {
+                "authenticated": False,
+                "account": None,
+                "error": "not_logged_in",
+                "stderr": result.stderr.strip(),
+            }
+
+        data = json.loads(result.stdout)
+        return {
+            "authenticated": True,
+            "account": data.get("user", {}).get("name"),
+            "error": None,
+        }
+
+    except Exception as e:
+        return {
+            "authenticated": False,
+            "account": None,
+            "error": str(e),
+            "traceback": traceback.format_exc(),
+        }
 
 
 @app.post("/auth/login")
 async def auth_login():
-    logger.info("[AUTH] login triggered")
-
-    def run_login():
-        cmd = shutil.which("az") or shutil.which("az.cmd")
+    import shutil, subprocess, json, os, asyncio, traceback
+    try:
+        cmd = (
+            shutil.which("az")
+            or shutil.which("az.cmd")
+            or (r"C:\Program Files (x86)\Microsoft SDKs\Azure\CLI2\wbin\az.cmd" if os.path.exists(r"C:\Program Files (x86)\Microsoft SDKs\Azure\CLI2\wbin\az.cmd") else None)
+            or (r"C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin\az.cmd" if os.path.exists(r"C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin\az.cmd") else None)
+        )
         if not cmd:
-            logger.error("[AUTH] login failed | error=az CLI not found in PATH")
-            return False
-        logger.debug(f"subprocess: {cmd} login")
-        result = subprocess.run([cmd, "login"], capture_output=True, text=True)
-        logger.debug(f"returncode: {result.returncode}")
-        if result.stdout:
-            logger.debug(f"stdout: {result.stdout.strip()}")
-        if result.stderr:
-            logger.warning(f"stderr: {result.stderr.strip()}")
-        return result.returncode == 0
+            raise HTTPException(status_code=500, detail="Azure CLI not found")
 
-    success = await asyncio.to_thread(run_login)
-    if not success:
-        logger.error("[AUTH] login failed | error=non-zero returncode or cancelled")
-        raise HTTPException(status_code=401, detail="Login failed or was cancelled.")
+        env = {
+            **os.environ,
+            "PATH": os.environ.get("PATH", "")
+            + r";C:\Program Files (x86)\Microsoft SDKs\Azure\CLI2\wbin"
+            + r";C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin",
+        }
 
-    client = GraphAuthClient()
-    account = client.get_account()
-    logger.info(f"[AUTH] login success | account={account}")
-    return {"authenticated": True, "account": account}
+        def run_login():
+            result = subprocess.run(
+                [cmd, "login"],
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+            return result.returncode == 0
+
+        success = await asyncio.get_event_loop().run_in_executor(None, run_login)
+        if not success:
+            raise HTTPException(status_code=401, detail="Login failed or was cancelled")
+
+        result = subprocess.run(
+            [cmd, "account", "show"],
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        data = json.loads(result.stdout)
+        return {
+            "authenticated": True,
+            "account": data.get("user", {}).get("name"),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"{str(e)}\n{traceback.format_exc()}")
 
 
 @app.post("/auth/logout")
