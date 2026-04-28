@@ -20,11 +20,23 @@ from __future__ import annotations
 import os
 import re
 import shutil
+import subprocess
 import tempfile
 import threading
 import time
 from pathlib import Path
 from typing import List, Optional
+
+BASE_DIR = Path(__file__).resolve().parent
+PS_BRIDGE = BASE_DIR / "tools" / "export_unprotected_docx.ps1"
+
+PROTECTED_DOC_USER_MESSAGE = (
+    "This document appears to be Microsoft Purview-protected. The converter "
+    "tried to open it through Word using the current signed-in user, but Word "
+    "could not export an unprotected temporary copy. Confirm that Word is "
+    "installed, the user is signed in, and the user has permission to open "
+    "the document."
+)
 
 from fastapi import FastAPI, Request, UploadFile, File, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
@@ -90,6 +102,114 @@ def _get_converter():
     if _converter is None:
         raise RuntimeError("Document converter is not available.")
     return _converter
+
+
+# ---------------------------------------------------------------------------
+# Purview-protected document fallback (Word COM via PowerShell bridge)
+# ---------------------------------------------------------------------------
+
+# Heuristic substrings indicating the file is likely Purview/IRM-protected
+# or otherwise blocked from direct read by Docling.
+_PROTECTED_SIGNALS = (
+    "encrypted",
+    "password",
+    "permission",
+    "protected",
+    "irm",
+    "rights management",
+    "cannot open",
+    "access denied",
+    "sensitivity",
+    "purview",
+    "package not found",  # zipfile error when Docling sees an OLE-encrypted blob
+    "bad zip",
+    "not a zip file",
+    "compdoc",
+)
+
+
+def _should_try_protected_bridge(error: Exception) -> bool:
+    message = str(error).lower()
+    return any(signal in message for signal in _PROTECTED_SIGNALS)
+
+
+def _get_powershell_executable() -> str:
+    return shutil.which("pwsh") or shutil.which("powershell.exe") or "powershell.exe"
+
+
+def _export_unprotected_docx_with_powershell(input_path: Path, output_path: Path) -> None:
+    """Invoke the Word-COM PowerShell bridge to export an unprotected DOCX copy.
+
+    Relies on the current signed-in Windows/Office identity to decrypt the file.
+    Raises ``RuntimeError`` if the bridge fails or does not produce the file.
+    """
+    if not PS_BRIDGE.exists():
+        raise FileNotFoundError(f"PowerShell bridge script not found: {PS_BRIDGE}")
+
+    completed = subprocess.run(
+        [
+            _get_powershell_executable(),
+            "-NoProfile",
+            "-ExecutionPolicy", "Bypass",
+            "-File", str(PS_BRIDGE),
+            "-InputPath", str(input_path),
+            "-OutputPath", str(output_path),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+
+    if completed.returncode != 0:
+        raise RuntimeError(
+            "PowerShell decrypt/export bridge failed.\n\n"
+            f"STDOUT:\n{completed.stdout}\n\n"
+            f"STDERR:\n{completed.stderr}"
+        )
+
+
+def _convert_docx_with_protected_fallback(input_path: Path):
+    """Run Docling on ``input_path``; on a likely-protected error, retry via Word COM.
+
+    Returns the Docling ``ConversionResult`` (matching ``converter.convert(...)``
+    so callers can keep iterating ``document.iterate_items()`` etc.).
+
+    The temporary unprotected DOCX is created inside a ``TemporaryDirectory`` and
+    is removed when this function returns, regardless of success or failure.
+    """
+    converter = _get_converter()
+    input_path = Path(input_path)
+
+    try:
+        return converter.convert(input_path)
+    except Exception as direct_error:
+        if not _should_try_protected_bridge(direct_error):
+            raise
+
+        logger.info(
+            f"[PROTECTED] Docling failed on {input_path.name}; "
+            f"attempting Word COM decrypt bridge"
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_docx = Path(temp_dir) / f"{input_path.stem}.unprotected.docx"
+            try:
+                _export_unprotected_docx_with_powershell(
+                    input_path=input_path,
+                    output_path=temp_docx,
+                )
+            except Exception as bridge_error:
+                logger.error(f"[PROTECTED] Bridge failed: {bridge_error}")
+                raise RuntimeError(PROTECTED_DOC_USER_MESSAGE) from bridge_error
+
+            if not temp_docx.exists():
+                raise RuntimeError(
+                    "PowerShell bridge completed, but the temporary unprotected "
+                    "DOCX was not created."
+                )
+
+            logger.info(f"[PROTECTED] Bridge succeeded; re-running Docling")
+            return converter.convert(temp_docx)
 
 
 # ---------------------------------------------------------------------------
@@ -201,7 +321,7 @@ def _convert_docx_path_to_markdown(
     try:
         from docling_core.types.doc import PictureItem  # noqa: PLC0415
 
-        conv_res = _get_converter().convert(src_path)
+        conv_res = _convert_docx_with_protected_fallback(src_path)
 
         picture_counter = 0
         for element, _level in conv_res.document.iterate_items():
