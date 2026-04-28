@@ -123,16 +123,39 @@ exported from Word:
 
 ## Batch conversion
 
-1. Click **Batch Convert Selected Files** (multi-select files) or
-   **Batch Convert Folder** (entire folder).
-2. The app converts every `.docx`. It skips other file types and continues
-   even if individual files fail.
-3. A summary shows how many files succeeded, how many failed, and **why
-   each failed file failed**.
-4. Outputs land directly in `C:/temp/W2MD/Outputs`. Batch outputs include
-   `-BATCH` in the filename — e.g. `Security Spec.docx` becomes
-   `Security Spec-BATCH.md` — to flag that the file still needs
-   review/editing before being treated as final.
+You have three ways to convert many `.docx` files at once. All three write
+results into `C:/temp/W2MD/Outputs` and use the `-BATCH` suffix in the
+filename — e.g. `Security Spec.docx` becomes `Security Spec-BATCH.md` —
+to flag that the file still needs review/editing before being treated as
+final. Each method skips non-`.docx` files and continues on individual
+failures, then shows a summary with success/fail counts and **why each
+failed file failed**.
+
+### 1. Selected files (browser upload)
+
+Click **Batch Convert Selected Files**, multi-select files in the picker,
+and the browser uploads them to the local server.
+
+### 2. Folder picker (browser upload)
+
+Click **Batch Convert Folder**, pick a folder, and the browser uploads
+every `.docx` inside it.
+
+### 3. Scan a folder on disk (no upload)
+
+Best for large folders or files that already live on this machine — the
+server reads them directly from disk, no browser upload step:
+
+1. Paste an absolute folder path into the **folder path** field
+   (e.g. `C:\Docs\Specs`).
+2. Leave **Include subfolders** checked to scan recursively, or uncheck
+   for the top level only.
+3. Click **Scan Folder & Convert**.
+
+The server enumerates every `.docx` under that path (skipping Word lock
+files like `~$Draft.docx`) and converts each one. Because the app only
+binds to `127.0.0.1`, this option is safe — no remote caller can reach
+the endpoint.
 
 ## Stopping the server
 

@@ -6,7 +6,8 @@ Endpoints:
     GET    /health                 Liveness probe
     GET    /api/status             Docling readiness
     POST   /api/convert            Single-file conversion
-    POST   /api/convert-batch      Batch conversion
+    POST   /api/convert-batch      Batch conversion (uploaded files)
+    POST   /api/convert-folder     Scan a local folder and convert all .docx
     POST   /api/save-changes       Persist edited Markdown
     GET    /api/open-folder        Open the Outputs folder in Explorer
     POST   /api/shutdown           Stop the server
@@ -174,19 +175,20 @@ async def log_requests(request: Request, call_next):
 # Core conversion helper
 # ---------------------------------------------------------------------------
 
-def convert_file_to_markdown(
-    upload_file: UploadFile,
+def _convert_docx_path_to_markdown(
+    src_path: Path,
     *,
+    display_name: str,
     output_filename: str,
     include_markdown: bool = True,
 ) -> dict:
-    """Convert one uploaded ``.docx`` file to Markdown using Docling.
+    """Run Docling on a local ``.docx`` file and write Markdown + images.
 
-    Always writes the resulting ``.md`` directly under :data:`OUTPUTS_ROOT`
-    using ``output_filename`` (e.g. ``MyDoc.md`` or ``MyDoc-BATCH.md``).
-    Extracted images go to ``OUTPUTS_ROOT/Images/<slug>/``.
+    Writes the resulting ``.md`` directly under :data:`OUTPUTS_ROOT` using
+    ``output_filename``. Extracted images go to ``OUTPUTS_ROOT/Images/<slug>/``.
+    ``display_name`` is only used for logging / image-folder naming.
     """
-    original_stem = Path(upload_file.filename or "document").stem
+    original_stem = Path(display_name).stem
     image_slug = safe_image_dir(original_stem)
     image_folder = _unique_image_dir(image_slug)
     image_folder.mkdir(parents=True, exist_ok=True)
@@ -194,17 +196,12 @@ def convert_file_to_markdown(
     md_file_path = _unique_path(OUTPUTS_ROOT, output_filename)
 
     t0 = time.perf_counter()
-    logger.info(f"[CONVERT] start | file={upload_file.filename} -> {md_file_path.name}")
+    logger.info(f"[CONVERT] start | file={display_name} -> {md_file_path.name}")
 
-    tmp_path: Optional[Path] = None
     try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".docx", dir=str(TEMP_ROOT)) as tmp:
-            shutil.copyfileobj(upload_file.file, tmp)
-            tmp_path = Path(tmp.name)
-
         from docling_core.types.doc import PictureItem  # noqa: PLC0415
 
-        conv_res = _get_converter().convert(tmp_path)
+        conv_res = _get_converter().convert(src_path)
 
         picture_counter = 0
         for element, _level in conv_res.document.iterate_items():
@@ -224,7 +221,7 @@ def convert_file_to_markdown(
             f.write(final_markdown)
 
         elapsed_ms = int((time.perf_counter() - t0) * 1000)
-        logger.info(f"[CONVERT] done  | file={upload_file.filename} | elapsed={elapsed_ms}ms")
+        logger.info(f"[CONVERT] done  | file={display_name} | elapsed={elapsed_ms}ms")
 
         result = {
             "doc_name": md_file_path.stem,
@@ -237,8 +234,33 @@ def convert_file_to_markdown(
 
     except Exception as exc:
         elapsed_ms = int((time.perf_counter() - t0) * 1000)
-        logger.error(f"[CONVERT] fail  | file={upload_file.filename} | elapsed={elapsed_ms}ms | error={exc}")
+        logger.error(f"[CONVERT] fail  | file={display_name} | elapsed={elapsed_ms}ms | error={exc}")
         raise
+
+
+def convert_file_to_markdown(
+    upload_file: UploadFile,
+    *,
+    output_filename: str,
+    include_markdown: bool = True,
+) -> dict:
+    """Convert one uploaded ``.docx`` file to Markdown using Docling.
+
+    Spools the upload to a temp file, then delegates to
+    :func:`_convert_docx_path_to_markdown`.
+    """
+    tmp_path: Optional[Path] = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".docx", dir=str(TEMP_ROOT)) as tmp:
+            shutil.copyfileobj(upload_file.file, tmp)
+            tmp_path = Path(tmp.name)
+
+        return _convert_docx_path_to_markdown(
+            tmp_path,
+            display_name=upload_file.filename or "document",
+            output_filename=output_filename,
+            include_markdown=include_markdown,
+        )
     finally:
         if tmp_path and tmp_path.exists():
             tmp_path.unlink(missing_ok=True)
@@ -376,6 +398,86 @@ async def convert_documents_batch(files: List[UploadFile] = File(...)):
 
     return {
         "output_dir": str(OUTPUTS_ROOT),
+        "converted_count": len(converted_files),
+        "failed_count": len(failed_files),
+        "converted_files": converted_files,
+        "failed_files": failed_files,
+    }
+
+
+@app.post("/api/convert-folder")
+async def convert_documents_in_folder(data: dict = Body(...)):
+    """Scan a local folder for ``.docx`` files and convert each one.
+
+    Body: ``{"folder_path": "C:/path/to/folder", "recursive": true}``
+    The server reads files directly from disk (no upload) — only safe in
+    this app because it binds to ``127.0.0.1``.
+    """
+    raw_path = (data.get("folder_path") or "").strip().strip('"').strip("'")
+    if not raw_path:
+        raise HTTPException(status_code=400, detail="folder_path is required.")
+    recursive = bool(data.get("recursive", True))
+
+    try:
+        folder = Path(raw_path).expanduser().resolve()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid folder path: {exc}")
+
+    if not folder.exists() or not folder.is_dir():
+        raise HTTPException(status_code=400, detail=f"Folder does not exist: {folder}")
+
+    pattern = "**/*.docx" if recursive else "*.docx"
+    # Collect, dedupe (case-insensitive on Windows), skip Word lock files (~$*.docx).
+    seen: set[str] = set()
+    docx_files: list[Path] = []
+    for p in folder.glob(pattern):
+        if not p.is_file():
+            continue
+        if p.name.startswith("~$"):
+            continue
+        key = str(p).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        docx_files.append(p)
+
+    docx_files.sort()
+    logger.info(f"[FOLDER-SCAN] folder={folder} recursive={recursive} found={len(docx_files)}")
+
+    if not docx_files:
+        return {
+            "output_dir": str(OUTPUTS_ROOT),
+            "scanned_folder": str(folder),
+            "scanned_count": 0,
+            "converted_count": 0,
+            "failed_count": 0,
+            "converted_files": [],
+            "failed_files": [],
+        }
+
+    converted_files: list[dict] = []
+    failed_files: list[dict] = []
+
+    for src in docx_files:
+        try:
+            item = _convert_docx_path_to_markdown(
+                src,
+                display_name=src.name,
+                output_filename=batch_output_name(src.name),
+                include_markdown=False,
+            )
+            converted_files.append({"input": str(src), "output": item["output_file"]})
+        except Exception as exc:
+            logger.exception(f"Unhandled error in /api/convert-folder for {src}: {exc}")
+            failed_files.append({
+                "input": str(src),
+                "error": str(exc) or "Document could not be read",
+            })
+
+    return {
+        "output_dir": str(OUTPUTS_ROOT),
+        "scanned_folder": str(folder),
+        "scanned_count": len(docx_files),
         "converted_count": len(converted_files),
         "failed_count": len(failed_files),
         "converted_files": converted_files,

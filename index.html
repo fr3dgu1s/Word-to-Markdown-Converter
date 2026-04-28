@@ -324,6 +324,14 @@
                     <button type="button" onclick="event.stopPropagation(); document.getElementById('batch-file-input').click();">Batch Convert Selected Files</button>
                     <button type="button" onclick="event.stopPropagation(); document.getElementById('folder-input').click();">Batch Convert Folder</button>
                 </div>
+                <div class="upload-actions" style="margin-top:0.6rem;" onclick="event.stopPropagation();">
+                    <input type="text" id="folder-path-input" placeholder="C:\path\to\folder of .docx files"
+                           style="flex:1; min-width:240px; padding:0.5rem 0.7rem; border:1px solid var(--color-border); border-radius:var(--radius-sm); background:var(--color-surface); color:var(--color-text); font-size:0.85rem;" />
+                    <label style="display:inline-flex; align-items:center; gap:0.3rem; font-size:0.82rem; color:var(--color-text-muted);">
+                        <input type="checkbox" id="folder-recursive" checked /> Include subfolders
+                    </label>
+                    <button type="button" onclick="event.stopPropagation(); scanFolderAndConvert();">Scan Folder &amp; Convert</button>
+                </div>
             </div>
             <div id="batch-status" class="batch-status hidden"></div>
         </div>
@@ -571,6 +579,54 @@ function startDocxConversion(file) {
 }
 
 // ── Batch conversion ──────────────────────────────────────────────────────
+function renderBatchResult(data, headerLabel) {
+    stepLoading.classList.add('hidden');
+    stepWorkspace.classList.add('hidden');
+    stepUpload.classList.remove('hidden');
+
+    const converted = data.converted_files || [];
+    const failed    = data.failed_files    || [];
+    const outputDir = data.output_dir || '';
+    const scanned   = (typeof data.scanned_count === 'number') ? data.scanned_count : null;
+    const scannedFolder = data.scanned_folder || '';
+
+    const parts = [
+        `<strong>${escapeHtml(headerLabel)}</strong> Output: ${escapeHtml(outputDir)}`,
+    ];
+    if (scannedFolder) {
+        parts.push(`<div>Scanned folder: <code>${escapeHtml(scannedFolder)}</code></div>`);
+    }
+    parts.push(`<ul>`);
+    if (scanned !== null) {
+        parts.push(`<li><strong>${scanned}</strong> .docx file(s) found.</li>`);
+    }
+    parts.push(`<li><strong>${converted.length}</strong> file(s) converted and saved.</li>`);
+    parts.push(`<li><strong>${failed.length}</strong> file(s) failed.</li>`);
+    parts.push(`</ul>`);
+
+    if (converted.length) {
+        parts.push(`<details><summary>Converted files</summary><ul>`);
+        converted.forEach(c => {
+            const inputName  = (c.input  || '').split(/[\\/]/).pop();
+            const outputName = (c.output || '').split(/[\\/]/).pop();
+            parts.push(`<li>${escapeHtml(inputName)} &rarr; ${escapeHtml(outputName)}</li>`);
+        });
+        parts.push(`</ul></details>`);
+    }
+
+    if (failed.length) {
+        parts.push(`<div class="failed-block"><strong>Failed files:</strong><ul>`);
+        failed.forEach(f => {
+            const inputName = (f.input || '').split(/[\\/]/).pop() || '(unknown)';
+            parts.push(`<li><strong>${escapeHtml(inputName)}</strong>: ${escapeHtml(f.error || 'Unknown error')}</li>`);
+        });
+        parts.push(`</ul></div>`);
+    }
+
+    showBatchStatus(parts.join(''));
+    if (converted.length) openFolder();
+}
+
 function startBatchConversion(files, sourceLabel = 'selected files') {
     const docxFiles = files.filter(f => f.name.toLowerCase().endsWith('.docx'));
     if (!docxFiles.length) { alert('Batch conversion supports .docx files only.'); return; }
@@ -595,47 +651,64 @@ function startBatchConversion(files, sourceLabel = 'selected files') {
             }
             return r.json();
         })
-        .then(data => {
-            stepLoading.classList.add('hidden');
-            stepWorkspace.classList.add('hidden');
-            stepUpload.classList.remove('hidden');
-
-            const converted = data.converted_files || [];
-            const failed    = data.failed_files    || [];
-            const outputDir = data.output_dir || '';
-
-            const parts = [
-                `<strong>Batch conversion finished.</strong> Output: ${escapeHtml(outputDir)}`,
-                `<ul>`,
-                `<li><strong>${converted.length}</strong> file(s) converted and saved.</li>`,
-                `<li><strong>${failed.length}</strong> file(s) failed.</li>`,
-                `</ul>`,
-            ];
-
-            if (converted.length) {
-                parts.push(`<details><summary>Converted files</summary><ul>`);
-                converted.forEach(c => {
-                    const name = (c.output || '').split(/[\\/]/).pop();
-                    parts.push(`<li>${escapeHtml(c.input)} &rarr; ${escapeHtml(name)}</li>`);
-                });
-                parts.push(`</ul></details>`);
-            }
-
-            if (failed.length) {
-                parts.push(`<div class="failed-block"><strong>Failed files:</strong><ul>`);
-                failed.forEach(f => {
-                    parts.push(`<li><strong>${escapeHtml(f.input || '(unknown)')}</strong>: ${escapeHtml(f.error || 'Unknown error')}</li>`);
-                });
-                parts.push(`</ul></div>`);
-            }
-
-            showBatchStatus(parts.join(''));
-            if (converted.length) openFolder();
-        })
+        .then(data => renderBatchResult(data, 'Batch conversion finished.'))
         .catch(err => {
             stepLoading.classList.add('hidden');
             stepUpload.classList.remove('hidden');
             alert('Batch conversion failed: ' + err.message);
+        });
+}
+
+// ── Server-side folder scan ───────────────────────────────────────────────
+function scanFolderAndConvert() {
+    const pathInput     = document.getElementById('folder-path-input');
+    const recursiveBox  = document.getElementById('folder-recursive');
+    const folderPath    = (pathInput?.value || '').trim();
+    if (!folderPath) {
+        alert('Enter a folder path on this machine (e.g. C:\\Docs\\Specs).');
+        pathInput?.focus();
+        return;
+    }
+    const recursive = !!recursiveBox?.checked;
+
+    setLoadingState('Scanning folder…', `Looking for .docx files in ${folderPath}`);
+    batchStatus.classList.add('hidden');
+    stepUpload.classList.add('hidden');
+    stepLoading.classList.remove('hidden');
+
+    fetch('/api/convert-folder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folder_path: folderPath, recursive: recursive }),
+    })
+        .then(async r => {
+            if (!r.ok) {
+                let msg = 'Server error during folder scan.';
+                try {
+                    const p = await r.json();
+                    if (typeof p?.detail === 'string') msg = p.detail;
+                    else if (p?.detail?.message) msg = p.detail.message;
+                } catch (_) {}
+                throw new Error(msg);
+            }
+            return r.json();
+        })
+        .then(data => {
+            if ((data.scanned_count || 0) === 0) {
+                stepLoading.classList.add('hidden');
+                stepUpload.classList.remove('hidden');
+                showBatchStatus(
+                    `<strong>No .docx files found</strong> in <code>${escapeHtml(data.scanned_folder || folderPath)}</code>` +
+                    (recursive ? ' (including subfolders).' : ' (top level only).')
+                );
+                return;
+            }
+            renderBatchResult(data, 'Folder scan finished.');
+        })
+        .catch(err => {
+            stepLoading.classList.add('hidden');
+            stepUpload.classList.remove('hidden');
+            alert('Folder scan failed: ' + err.message);
         });
 }
 
