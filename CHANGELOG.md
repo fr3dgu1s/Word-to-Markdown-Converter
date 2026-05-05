@@ -7,6 +7,11 @@ here.
 
 ### Added
 
+- Added Microsoft Purview / MIP protected-file handling through a persistent
+  Microsoft Word COM instance. Protected uploads are detected as non-ZIP `.docx`
+  files, saved as clean temporary copies through Word, converted by Docling, and
+  cleaned up immediately.
+- Added `pywin32` as a dependency for Word COM automation.
 - Added an in-app GitHub update check. When the local app checkout is behind
   the latest `main` branch on GitHub, the UI shows an update banner with a link
   to compare the local version with the latest online version.

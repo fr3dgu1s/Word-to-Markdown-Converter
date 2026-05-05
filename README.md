@@ -1,10 +1,7 @@
-# Word-to-Markdown Converter
+# Markdown Studio
 
-A small, local-only FastAPI application that converts Word `.docx` files to
-Markdown using [Docling](https://github.com/DS4SD/docling). Conversion runs
-entirely on your machine — no authentication and no cloud document processing.
-The optional update check contacts GitHub to see whether a newer app version is
-available.
+A local AI-powered Word-to-Markdown converter with a built-in Markdown editor
+and preview.
 
 ## Purpose
 
@@ -12,10 +9,19 @@ available.
 - Preview and edit the converted Markdown in the browser.
 - Save or download the edited Markdown.
 - Save extracted images alongside the Markdown so links work in any viewer.
+- Handle Microsoft Purview / MIP protected Word files when Microsoft Word can
+  decrypt them for the signed-in user.
+
+## Tech stack
+
+- **Backend:** Python, FastAPI, Docling AI, pywin32
+- **Frontend:** Single-file vanilla HTML/JavaScript, no build step
 
 ## Prerequisites
 
 - Windows 10 / 11
+- Microsoft Word installed and signed in to Office 365 for Purview-protected
+  files
 - Python 3.10 or newer
 - The Python packages listed in [requirements.txt](requirements.txt)
 
@@ -151,6 +157,67 @@ exported from Word:
   shows: *"No Markdown table selected or detected."*
 6. Click **Open Folder** to reveal the file in Windows Explorer.
 
+## Microsoft Purview / MIP protected files
+
+Files with Purview sensitivity labels that apply encryption are not standard
+ZIP-based `.docx` packages. Docling cannot read those encrypted bytes directly.
+
+Markdown Studio detects this by opening the upload with Python's `zipfile`
+module:
+
+- Valid ZIP package: convert directly with Docling.
+- `BadZipFile`: treat as Purview/MIP-protected and route through Microsoft Word.
+
+For protected files, the server keeps one persistent hidden
+`Word.Application` COM instance alive for the server process. Word handles MIP
+decryption using the already-authenticated Office session, saves a clean
+temporary `.docx` copy, and Docling converts that clean temp file. The clean
+temp copy is deleted immediately after conversion.
+
+If your organization does not allow removing labels entirely, update
+`strip_protection_and_save()` in `server.py` to set your organization's
+non-encrypting "General" label instead of calling:
+
+```python
+doc.SensitivityLabel.SetLabel("", "")
+```
+
+You can find label GUIDs with the AIPService PowerShell module:
+
+```powershell
+Connect-AipService
+Get-Label | Select DisplayName, Guid
+```
+
+Protected-file support requires `pywin32` and Microsoft Word. If Word COM
+cannot start, normal non-protected files still convert normally.
+
+### Protected-file conversion flow
+
+```text
+browser upload
+    |
+    v
+FastAPI /api/convert
+    |
+    +-- is_purview_protected() == false --> Docling directly
+    |
+    +-- is_purview_protected() == true
+          |
+          v
+       persistent Word COM instance
+          |
+          +-- open protected file
+          +-- remove label when policy allows
+          +-- SaveAs clean temporary .docx
+          |
+          v
+       Docling converts clean temp file
+          |
+          v
+       clean temp file is deleted
+```
+
 ## Batch conversion
 
 You have three ways to convert many `.docx` files at once. All three write
@@ -211,7 +278,7 @@ You have three options:
 | Browser opens the loading page but never redirects | The Docling first-run model download is still in progress — wait a minute and refresh. Check `<project folder>\Logs\app.log` if it persists. |
 | `Document converter failed to initialise` | Re-run `python -m pip install -r requirements.txt`. The first run downloads Docling models — make sure you have internet access. |
 | `.docx` won't open / "file already in use" | Close the document in Microsoft Word and try again. |
-| Encrypted / IRM-protected `.docx` fails | This app is local-only and does not handle protected files. Decrypt the document in Word first (open it, save a copy as `.docx`), then convert that copy. |
+| Purview / MIP-protected `.docx` fails | Ensure Microsoft Word is installed, signed in to Office 365, and the current user has rights to open/export the file. If policy requires labels, configure `strip_protection_and_save()` with a non-encrypting label GUID. |
 | Images don't appear in preview | Ensure conversion completed successfully and that `<project folder>\Outputs\Images\<doc>\` contains PNG files. |
 
 ## Acknowledgements

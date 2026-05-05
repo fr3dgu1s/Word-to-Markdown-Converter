@@ -13,6 +13,8 @@ This repository contains a local-only Windows application for converting Word
 4. Runtime files default to the project/app folder containing paths.py.
 5. A best-effort update check contacts GitHub to see whether a newer version is
    available.
+6. Microsoft Purview / MIP protected Word files are routed through a persistent
+   Word COM instance when Word can decrypt them for the signed-in user.
 
 The app does not use cloud APIs, authentication, or external services for
 document conversion. There is an archive folder containing older or
@@ -113,8 +115,9 @@ logging_config.py
 server.py
     Active local FastAPI backend. It owns Docling initialization, filename
     safety helpers, conversion helpers, endpoints, static output serving,
-    GitHub update checks, changelog serving, request logging, save handling,
-    folder scan, log tailing, log clearing, and shutdown.
+    Purview/Word COM handling, GitHub update checks, changelog serving, request
+    logging, save handling, folder scan, log tailing, log clearing, and
+    shutdown.
 
 index.html
     Active browser UI. Contains all frontend layout, styling, state, API calls,
@@ -198,11 +201,22 @@ Update helpers:
 Core conversion:
 - _convert_docx_path_to_markdown(src_path, display_name, output_filename,
   include_markdown=True)
-  Converts a local docx path, extracts pictures, writes Markdown and images, and
-  returns output metadata plus Markdown content when requested.
+  Converts a local docx path, routes Purview-protected files through Word COM
+  first, extracts pictures, writes Markdown and images, and returns output
+  metadata plus Markdown content when requested.
 - convert_file_to_markdown(upload_file, output_filename, include_markdown=True)
   Writes UploadFile to a temporary .docx in TEMP_ROOT, delegates conversion, and
   removes the temp upload file.
+
+Purview / MIP helpers:
+- is_purview_protected(path)
+  Treats a .docx as protected when it cannot be opened as a ZIP package.
+- get_word_app()
+  Creates or returns the persistent hidden Word.Application COM instance used
+  for protected files.
+- strip_protection_and_save(protected_path)
+  Opens the protected file in Word, attempts to remove the sensitivity label,
+  saves a clean temporary .docx, and closes the original without saving changes.
 
 Middleware:
 - global_exception_handler()
@@ -382,6 +396,8 @@ index.html startDocxConversion()
       -> convert_file_to_markdown()
         -> temporary upload file in TEMP_ROOT
         -> _convert_docx_path_to_markdown()
+          -> is_purview_protected()
+          -> strip_protection_and_save() when protected
           -> _get_converter()
           -> Docling convert()
           -> PictureItem extraction to IMAGES_ROOT\<slug>\image_N.png

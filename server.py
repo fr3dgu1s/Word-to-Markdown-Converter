@@ -30,6 +30,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
@@ -41,6 +42,13 @@ from fastapi.responses import FileResponse, JSONResponse
 
 from logging_config import setup_logging
 from paths import PROJECT_ROOT, OUTPUTS_ROOT, IMAGES_ROOT, TEMP_ROOT, LOGS_ROOT
+
+try:
+    import pythoncom  # type: ignore
+    import win32com.client  # type: ignore
+except ImportError:
+    pythoncom = None
+    win32com = None
 
 logger = setup_logging()
 
@@ -71,6 +79,38 @@ async def global_exception_handler(request: Request, exc: Exception):
 _converter_ready = threading.Event()
 _converter = None
 _converter_error: Optional[str] = None
+_word_app = None
+_word_lock = threading.Lock()
+
+
+def get_word_app():
+    """
+    Return the shared persistent Word.Application COM instance.
+
+    Word is created on first use, then kept alive for the server process so MIP
+    authentication can be reused across protected-file conversions.
+    """
+    global _word_app
+    if pythoncom is None or win32com is None:
+        raise RuntimeError(
+            "pywin32 is required for Purview-protected files. "
+            "Install it with `python -m pip install -r requirements.txt`."
+        )
+
+    if _word_app is not None:
+        try:
+            _ = _word_app.Version
+            return _word_app
+        except Exception:
+            _word_app = None
+
+    pythoncom.CoInitialize()
+    word = win32com.client.Dispatch("Word.Application")
+    word.Visible = False
+    word.DisplayAlerts = False
+    _word_app = word
+    logger.info("[Word COM] Word instance started and ready")
+    return _word_app
 
 
 def _init_converter() -> None:
@@ -159,6 +199,97 @@ def _unique_image_dir(stem_slug: str) -> Path:
         if not candidate.exists():
             return candidate
         counter += 1
+
+
+# ---------------------------------------------------------------------------
+# Purview / MIP protected-file helpers
+# ---------------------------------------------------------------------------
+
+def is_purview_protected(path: Path) -> bool:
+    """
+    A standard .docx is a valid ZIP archive.
+
+    A Purview-encrypted .docx is a CFB (Compound File Binary) container instead,
+    so Python's zipfile module raises BadZipFile.
+    """
+    try:
+        with zipfile.ZipFile(path, "r"):
+            return False
+    except zipfile.BadZipFile:
+        return True
+
+
+def strip_protection_and_save(protected_path: Path) -> Path:
+    """
+    Opens a Purview-protected .docx in the persistent Word instance.
+    Uses a two-step RTF intermediate to force encryption removal:
+      1. Save as RTF  — RTF cannot carry MIP labels, Word strips encryption here.
+      2. Re-open RTF  — now a plain, decrypted document.
+      3. Save as DOCX — produces a clean .docx Docling can read.
+    Avoids the SensitivityLabel COM API entirely.
+    """
+    rtf_temp = Path(tempfile.mktemp(suffix=".rtf"))
+    docx_temp = Path(tempfile.mktemp(suffix=".docx"))
+
+    with _word_lock:
+        word = get_word_app()
+        doc = None
+        rtf_doc = None
+        try:
+            # Step 1 — Open the protected file (Word decrypts via cached MIP session)
+            doc = word.Documents.Open(
+                str(protected_path.resolve()),
+                ReadOnly=False,
+                AddToRecentFiles=False,
+                Revert=False,
+            )
+
+            # Step 2 — Save as RTF (FileFormat 6 = wdFormatRTF)
+            # RTF has no MIP container support; Word is forced to write plain content.
+            doc.SaveAs2(
+                str(rtf_temp.resolve()),
+                FileFormat=6,
+                AddToRecentFiles=False,
+            )
+            doc.Close(False)
+            doc = None
+
+            # Step 3 — Re-open the now-clean RTF
+            rtf_doc = word.Documents.Open(
+                str(rtf_temp.resolve()),
+                ReadOnly=False,
+                AddToRecentFiles=False,
+            )
+
+            # Step 4 — Save as DOCX (FileFormat 16 = wdFormatXMLDocument)
+            rtf_doc.SaveAs2(
+                str(docx_temp.resolve()),
+                FileFormat=16,
+                AddToRecentFiles=False,
+            )
+            rtf_doc.Close(False)
+            rtf_doc = None
+
+            return docx_temp
+
+        except Exception as exc:
+            if docx_temp.exists():
+                docx_temp.unlink(missing_ok=True)
+            raise RuntimeError(f"Word COM strip-via-RTF failed: {exc}") from exc
+
+        finally:
+            # Always close open documents and delete the RTF intermediate
+            for d in [doc, rtf_doc]:
+                if d is not None:
+                    try:
+                        d.Close(False)
+                    except Exception:
+                        pass
+            if rtf_temp.exists():
+                try:
+                    rtf_temp.unlink()
+                except Exception:
+                    pass
 
 
 # ---------------------------------------------------------------------------
@@ -326,6 +457,8 @@ def _convert_docx_path_to_markdown(
     image_folder.mkdir(parents=True, exist_ok=True)
 
     md_file_path = _unique_path(OUTPUTS_ROOT, output_filename)
+    clean_tmp: Optional[Path] = None
+    docling_input_path = src_path
 
     t0 = time.perf_counter()
     logger.info(f"[CONVERT] start | file={display_name} -> {md_file_path.name}")
@@ -333,7 +466,12 @@ def _convert_docx_path_to_markdown(
     try:
         from docling_core.types.doc import PictureItem  # noqa: PLC0415
 
-        conv_res = _get_converter().convert(src_path)
+        if is_purview_protected(src_path):
+            logger.info(f"[Purview] Protected file detected: {display_name}. Stripping via Word...")
+            clean_tmp = strip_protection_and_save(src_path)
+            docling_input_path = clean_tmp
+
+        conv_res = _get_converter().convert(docling_input_path)
 
         picture_counter = 0
         for element, _level in conv_res.document.iterate_items():
@@ -368,6 +506,13 @@ def _convert_docx_path_to_markdown(
         elapsed_ms = int((time.perf_counter() - t0) * 1000)
         logger.error(f"[CONVERT] fail  | file={display_name} | elapsed={elapsed_ms}ms | error={exc}")
         raise
+    finally:
+        if clean_tmp and clean_tmp.exists():
+            try:
+                clean_tmp.unlink()
+                logger.info(f"[Purview] Deleted clean temp copy: {clean_tmp}")
+            except Exception as exc:
+                logger.warning(f"[Purview] Could not delete clean temp copy {clean_tmp}: {exc}")
 
 
 def convert_file_to_markdown(
@@ -652,6 +797,17 @@ def logs_clear():
         open(log_path, "w").close()
     logger.info("[LOGS] Log file cleared by user")
     return {"status": "cleared"}
+
+
+@app.on_event("startup")
+async def startup_warmup():
+    try:
+        get_word_app()
+        logger.info("[Startup] Word COM instance warmed up successfully")
+    except Exception as exc:
+        logger.warning(f"[Startup] Could not start Word COM: {exc}")
+        logger.warning("[Startup] Non-protected files will still convert normally")
+        logger.warning("[Startup] Purview-protected files will fail until Word COM is available")
 
 
 if __name__ == "__main__":

@@ -4,3 +4,4 @@ python-multipart
 pillow
 docling
 python-dotenv
+pywin32
