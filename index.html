@@ -152,6 +152,22 @@
             color: var(--color-warn-text); border-radius: var(--radius-sm);
             padding: 0.5rem 0.9rem; font-size: 0.85rem; margin-bottom: 0.75rem;
         }
+        .update-banner {
+            display: flex; align-items: center; justify-content: space-between;
+            gap: 0.85rem; flex-wrap: wrap;
+            background: #ecfdf5; border: 1px solid #86efac;
+            color: #166534; border-radius: var(--radius-sm);
+            padding: 0.65rem 0.9rem; font-size: 0.85rem; margin-bottom: 0.75rem;
+        }
+        .update-banner strong { display: block; margin-bottom: 0.15rem; }
+        .update-banner a, .update-banner button {
+            font-size: 0.8rem; font-weight: 700; color: #166534;
+            background: transparent; border: 1px solid #86efac;
+            border-radius: var(--radius-sm); padding: 0.32rem 0.55rem;
+            text-decoration: none; cursor: pointer;
+        }
+        .update-banner a:hover, .update-banner button:hover { background: rgba(22, 101, 52, 0.08); }
+        .update-actions { display: flex; gap: 0.4rem; flex-wrap: wrap; }
         .spin { display: inline-block; width: 14px; height: 14px; flex-shrink: 0;
             border: 2px solid currentColor; border-top-color: transparent;
             border-radius: 50%; animation: spin 0.8s linear infinite; }
@@ -313,6 +329,18 @@
             <span>Document engine is warming up — you can upload as soon as it finishes (usually under 30 s).</span>
         </div>
 
+        <div id="update-banner" class="update-banner hidden">
+            <div>
+                <strong>Update available</strong>
+                <span id="update-message">A newer version is available on GitHub.</span>
+            </div>
+            <div class="update-actions">
+                <a id="update-link" href="https://github.com/fr3dgu1s/Word-to-Markdown-Converter" target="_blank" rel="noopener">View update</a>
+                <a href="/changelog" target="_blank" rel="noopener">What's new</a>
+                <button type="button" onclick="dismissUpdateBanner()">Dismiss</button>
+            </div>
+        </div>
+
         <div id="step-upload">
             <div class="upload-area" id="drop-zone" onclick="document.getElementById('file-input').click()">
                 <h3>Drag &amp; Drop a .docx or .md file</h3>
@@ -453,6 +481,9 @@ const modalTitle      = document.getElementById('modal-title');
 const modalDesc       = document.getElementById('modal-desc');
 const modalWarn       = document.getElementById('modal-warn');
 const modalBtnCancel  = document.getElementById('modal-btn-cancel');
+const updateBanner    = document.getElementById('update-banner');
+const updateMessage   = document.getElementById('update-message');
+const updateLink      = document.getElementById('update-link');
 
 let currentFileName   = null;
 let currentOutputFile = null;
@@ -491,6 +522,35 @@ function setLoadingState(title, subtitle) {
 function showBatchStatus(html) {
     batchStatus.innerHTML = html;
     batchStatus.classList.remove('hidden');
+}
+
+// ── GitHub update check ───────────────────────────────────────────────────
+(function checkForUpdates() {
+    if (!updateBanner || !updateMessage || !updateLink) return;
+    fetch('/api/update-check', { cache: 'no-store' })
+        .then(r => r.ok ? r.json() : null)
+        .then(data => {
+            if (!data || !data.update_available || !data.latest_sha) return;
+            const dismissedSha = localStorage.getItem('w2md-dismissed-update-sha');
+            if (dismissedSha === data.latest_sha) return;
+
+            const local = data.local_short || 'local';
+            const latest = data.latest_short || 'latest';
+            const branch = data.branch || 'main';
+            const message = data.latest_message ? ` — ${data.latest_message}` : '';
+            updateMessage.textContent = `GitHub ${branch} has a newer version (${local} → ${latest})${message}`;
+            updateLink.href = data.compare_url || data.latest_url || updateLink.href;
+            updateBanner.dataset.latestSha = data.latest_sha;
+            updateBanner.classList.remove('hidden');
+        })
+        .catch(() => { /* Update checks are best-effort and should not block conversion. */ });
+})();
+
+function dismissUpdateBanner() {
+    if (updateBanner?.dataset.latestSha) {
+        localStorage.setItem('w2md-dismissed-update-sha', updateBanner.dataset.latestSha);
+    }
+    updateBanner?.classList.add('hidden');
 }
 
 // ── Dirty tracking ────────────────────────────────────────────────────────

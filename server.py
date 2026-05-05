@@ -5,6 +5,8 @@ Endpoints:
     GET    /                       Static index.html
     GET    /health                 Liveness probe
     GET    /api/status             Docling readiness
+    GET    /api/update-check       Compare local checkout with GitHub main
+    GET    /changelog              Static changelog
     POST   /api/convert            Single-file conversion
     POST   /api/convert-batch      Batch conversion (uploaded files)
     POST   /api/convert-folder     Scan a local folder and convert all .docx
@@ -17,12 +19,18 @@ Endpoints:
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
+import subprocess
 import tempfile
 import threading
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
 
@@ -32,11 +40,15 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 
 from logging_config import setup_logging
-from paths import OUTPUTS_ROOT, IMAGES_ROOT, TEMP_ROOT, LOGS_ROOT
+from paths import PROJECT_ROOT, OUTPUTS_ROOT, IMAGES_ROOT, TEMP_ROOT, LOGS_ROOT
 
 logger = setup_logging()
 
 app = FastAPI(title="Word-to-Markdown Converter")
+
+DEFAULT_UPDATE_REPOSITORY = "fr3dgu1s/Word-to-Markdown-Converter"
+DEFAULT_UPDATE_BRANCH = "main"
+UPDATE_CHECK_TIMEOUT_SECONDS = 6
 
 
 @app.exception_handler(Exception)
@@ -147,6 +159,126 @@ def _unique_image_dir(stem_slug: str) -> Path:
         if not candidate.exists():
             return candidate
         counter += 1
+
+
+# ---------------------------------------------------------------------------
+# Update check helpers
+# ---------------------------------------------------------------------------
+
+def _run_git(args: list[str]) -> Optional[str]:
+    try:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=str(PROJECT_ROOT),
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    value = result.stdout.strip()
+    return value or None
+
+
+def _resolve_update_repository() -> str:
+    configured = os.getenv("UPDATE_CHECK_REPOSITORY", "").strip()
+    if configured:
+        return configured.removesuffix(".git")
+
+    remote = _run_git(["remote", "get-url", "origin"]) or ""
+    patterns = (
+        r"github\.com[:/](?P<repo>[^/\s]+/[^/\s]+?)(?:\.git)?$",
+        r"https?://github\.com/(?P<repo>[^/\s]+/[^/\s]+?)(?:\.git)?$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, remote)
+        if match:
+            return match.group("repo")
+    return DEFAULT_UPDATE_REPOSITORY
+
+
+def _fetch_github_json(repository: str, path: str) -> dict:
+    url = f"https://api.github.com/repos/{repository}/{path.lstrip('/')}"
+    request = urllib.request.Request(
+        url,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "Word-to-Markdown-Converter",
+        },
+    )
+    with urllib.request.urlopen(request, timeout=UPDATE_CHECK_TIMEOUT_SECONDS) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def _fetch_latest_github_commit(repository: str, branch: str) -> dict:
+    encoded_branch = urllib.parse.quote(branch, safe="")
+    return _fetch_github_json(repository, f"commits/{encoded_branch}")
+
+
+def _fetch_github_compare(repository: str, local_sha: str, branch: str) -> Optional[dict]:
+    encoded_local = urllib.parse.quote(local_sha, safe="")
+    encoded_branch = urllib.parse.quote(branch, safe="")
+    try:
+        return _fetch_github_json(repository, f"compare/{encoded_local}...{encoded_branch}")
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError) as exc:
+        logger.warning(f"[UPDATE] Could not compare local commit with GitHub: {exc}")
+        return None
+
+
+def check_for_updates() -> dict:
+    repository = _resolve_update_repository()
+    branch = os.getenv("UPDATE_CHECK_BRANCH", DEFAULT_UPDATE_BRANCH).strip() or DEFAULT_UPDATE_BRANCH
+    local_sha = _run_git(["rev-parse", "HEAD"])
+
+    try:
+        latest = _fetch_latest_github_commit(repository, branch)
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError) as exc:
+        logger.warning(f"[UPDATE] Could not check GitHub updates: {exc}")
+        return {
+            "ok": False,
+            "update_available": False,
+            "repository": repository,
+            "branch": branch,
+            "local_sha": local_sha,
+            "error": str(exc),
+            "checked_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    latest_sha = latest.get("sha", "")
+    commit = latest.get("commit", {}) or {}
+    message = (commit.get("message") or "").splitlines()[0] if commit else ""
+    latest_url = latest.get("html_url") or f"https://github.com/{repository}/commit/{latest_sha}"
+    compare = _fetch_github_compare(repository, local_sha, branch) if local_sha else None
+    ahead_by = compare.get("ahead_by") if compare else None
+    compare_status = compare.get("status") if compare else None
+    update_available = (
+        bool(compare and compare_status in {"ahead", "diverged"} and (ahead_by or 0) > 0)
+        if compare else bool(local_sha and latest_sha and local_sha != latest_sha)
+    )
+    compare_url = (
+        f"https://github.com/{repository}/compare/{local_sha}...{latest_sha}"
+        if update_available else None
+    )
+
+    return {
+        "ok": True,
+        "update_available": update_available,
+        "repository": repository,
+        "branch": branch,
+        "local_sha": local_sha,
+        "local_short": local_sha[:7] if local_sha else None,
+        "latest_sha": latest_sha,
+        "latest_short": latest_sha[:7] if latest_sha else None,
+        "latest_message": message,
+        "latest_url": latest_url,
+        "compare_url": compare_url,
+        "ahead_by": ahead_by,
+        "compare_status": compare_status,
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -281,6 +413,11 @@ async def converter_status():
     return {"converter_ready": ready, "error": _converter_error}
 
 
+@app.get("/api/update-check")
+async def update_check():
+    return check_for_updates()
+
+
 # ---------------------------------------------------------------------------
 # Static / utility
 # ---------------------------------------------------------------------------
@@ -288,6 +425,14 @@ async def converter_status():
 @app.get("/")
 async def serve_index():
     return FileResponse("index.html")
+
+
+@app.get("/changelog")
+async def serve_changelog():
+    changelog_path = PROJECT_ROOT / "CHANGELOG.md"
+    if not changelog_path.exists():
+        raise HTTPException(status_code=404, detail="CHANGELOG.md was not found.")
+    return FileResponse(changelog_path, media_type="text/markdown")
 
 
 app.mount("/Outputs", StaticFiles(directory=str(OUTPUTS_ROOT)), name="Outputs")

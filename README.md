@@ -1,8 +1,10 @@
 # Word-to-Markdown Converter
 
 A small, local-only FastAPI application that converts Word `.docx` files to
-Markdown using [Docling](https://github.com/DS4SD/docling). It runs entirely
-on your machine — no cloud calls, no authentication, no external services.
+Markdown using [Docling](https://github.com/DS4SD/docling). Conversion runs
+entirely on your machine — no authentication and no cloud document processing.
+The optional update check contacts GitHub to see whether a newer app version is
+available.
 
 ## Purpose
 
@@ -55,6 +57,23 @@ python -m uvicorn server:app
 ```
 
 Then open <http://127.0.0.1:8000>.
+
+## Updates and changelog
+
+On startup, the browser UI asks the local server to compare the current local
+Git checkout with the latest `main` branch commit on GitHub. If a newer commit
+exists online, the app shows an **Update available** banner with a link to the
+GitHub compare view and a link to the local [changelog](CHANGELOG.md).
+
+The update check is best-effort: if the machine is offline, GitHub is
+unreachable, or the app is not running from a Git checkout, conversion still
+works and no update banner is shown.
+
+To update after reviewing the changelog, stop the app and run:
+
+```powershell
+git pull origin main
+```
 
 ## Default folders
 

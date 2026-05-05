@@ -11,9 +11,11 @@ This repository contains a local-only Windows application for converting Word
    preview, edit, save, copy, and open converted Markdown files.
 3. Docling performs the .docx-to-Markdown conversion locally.
 4. Runtime files default to the project/app folder containing paths.py.
+5. A best-effort update check contacts GitHub to see whether a newer version is
+   available.
 
-The app does not use cloud APIs, authentication, or external services in its
-current active runtime path. There is an archive folder containing older or
+The app does not use cloud APIs, authentication, or external services for
+document conversion. There is an archive folder containing older or
 future-looking work for Microsoft Graph, Microsoft Purview/MIP, RMS, and Word
 COM protected-document workflows. That archive code is not imported by the
 current server.py.
@@ -89,7 +91,11 @@ Active file inventory
     git history even though they are ignored for new changes.
 
 README.md
-    User-facing setup, run, conversion, batch, logs, and troubleshooting guide.
+    User-facing setup, run, update-check, conversion, batch, logs, and
+    troubleshooting guide.
+
+CHANGELOG.md
+    User-facing record of new features and behavior changes.
 
 requirements.txt
     Python runtime dependencies: fastapi, uvicorn, python-multipart, pillow,
@@ -107,13 +113,13 @@ logging_config.py
 server.py
     Active local FastAPI backend. It owns Docling initialization, filename
     safety helpers, conversion helpers, endpoints, static output serving,
-    request logging, save handling, folder scan, log tailing, log clearing, and
-    shutdown.
+    GitHub update checks, changelog serving, request logging, save handling,
+    folder scan, log tailing, log clearing, and shutdown.
 
 index.html
     Active browser UI. Contains all frontend layout, styling, state, API calls,
-    Markdown preview, toolbar behavior, table cleanup logic, save modal, log
-    viewer, and shutdown action.
+    update banner, Markdown preview, toolbar behavior, table cleanup logic,
+    save modal, log viewer, and shutdown action.
 
 loading.html
     Startup waiting page. It polls /health every few seconds and redirects to
@@ -177,6 +183,18 @@ Naming helpers:
 - _unique_image_dir(stem_slug)
   Avoids image folder collisions the same way.
 
+Update helpers:
+- _run_git(args)
+  Runs read-only git commands inside PROJECT_ROOT and returns stdout or None.
+- _resolve_update_repository()
+  Reads UPDATE_CHECK_REPOSITORY when set, otherwise parses origin remote and
+  falls back to fr3dgu1s/Word-to-Markdown-Converter.
+- _fetch_latest_github_commit(repository, branch)
+  Fetches the latest branch commit from the GitHub REST API.
+- check_for_updates()
+  Compares the local HEAD SHA with the latest GitHub branch SHA and returns a
+  best-effort update status for the UI.
+
 Core conversion:
 - _convert_docx_path_to_markdown(src_path, display_name, output_filename,
   include_markdown=True)
@@ -199,6 +217,11 @@ Endpoints:
   Returns {"ok": true}. Used by launch and loading pages.
 - GET /api/status
   Returns whether Docling is ready and any initialization error.
+- GET /api/update-check
+  Compares local HEAD with GitHub main and returns update_available plus commit
+  links. Failures are returned as ok=false so conversion is never blocked.
+- GET /changelog
+  Serves CHANGELOG.md for users who want to review what changed.
 - POST /api/convert
   Accepts one uploaded .docx, converts it, saves the .md file, and returns the
   Markdown plus file paths for the editor.
@@ -400,6 +423,15 @@ Preview images:
 server.py writes Markdown image links as Images/<image-folder>/image_N.png.
 index.html updatePreview() rewrites those relative links to /Outputs/Images/...
 server.py StaticFiles mount serves /Outputs from OUTPUTS_ROOT.
+
+Update check:
+index.html checkForUpdates()
+  -> GET /api/update-check
+    -> server.py check_for_updates()
+      -> git rev-parse HEAD for local version
+      -> GitHub REST API for latest main commit
+      -> return compare/changelog links when update_available is true
+  -> index.html shows the update banner unless the user dismissed that SHA
 
 Logs:
 logging_config.py writes LOGS_ROOT\app.log.
