@@ -12,6 +12,16 @@ and preview.
 - Handle Microsoft Purview / MIP protected Word files when Microsoft Word can
   decrypt them for the signed-in user.
 
+## Features
+
+- Convert single `.docx` files directly into the editor.
+- Open existing `.md` or `.txt` files for preview/editing.
+- Batch convert entire folders or multi-select files, including `.docx` files
+  inside subfolders.
+- Live per-file progress with clickable converted results.
+- Save extracted images alongside the Markdown so image links remain portable.
+- Optional dark/light appearance toggle.
+
 ## Tech stack
 
 - **Backend:** Python, FastAPI, Docling AI, pywin32
@@ -107,15 +117,21 @@ TEMP_ROOT=<project folder>\Temp
 LOGS_ROOT=<project folder>\Logs
 ```
 
-## Single file conversion
+## Usage
 
-1. Drop a `.docx` file onto the upload zone (or click to browse).
+### Single file conversion and Markdown preview
+
+1. Drop a single `.docx` file onto the upload zone.
 2. Wait for conversion. The Markdown opens in the editor.
 3. Edit using the toolbar (headings, bold, italics, lists, callouts,
    code blocks, tables, etc.).
 4. Switch to **Visual Preview** to render the Markdown with images.
 5. Click **Save** to update `<project folder>\Outputs\<doc-name>.md`,
    or **Copy** to copy Markdown to the clipboard.
+6. Click **Open Folder** to reveal the saved file in Windows Explorer.
+
+Drop a single `.md` or `.txt` file to open it directly in the preview tab
+without conversion.
 
 ### Editor commands
 
@@ -155,8 +171,6 @@ exported from Word:
 
   If no table is selected and none is detected near the cursor, the UI
   shows: *"No Markdown table selected or detected."*
-6. Click **Open Folder** to reveal the file in Windows Explorer.
-
 ## Microsoft Purview / MIP protected files
 
 Files with Purview sensitivity labels that apply encryption are not standard
@@ -220,39 +234,34 @@ FastAPI /api/convert
 
 ## Batch conversion
 
-You have three ways to convert many `.docx` files at once. All three write
-results into `<project folder>\Outputs` and use the `-BATCH` suffix in the
-filename — e.g. `Security Spec.docx` becomes `Security Spec-BATCH.md` —
-to flag that the file still needs review/editing before being treated as
-final. Each method skips non-`.docx` files and continues on individual
-failures, then shows a summary with success/fail counts and **why each
-failed file failed**.
+Use the same upload zone for batch work:
 
-### 1. Selected files (browser upload)
+1. Click the upload zone to open the OS folder picker. Markdown Studio queues
+   every `.docx` in that folder, including files in subfolders.
+2. Or drag a folder, multiple files, or a mix of files and folders onto the
+   upload zone.
+3. Or click **Select files** below the upload zone to multi-select individual
+   files in the OS file picker.
 
-Click **Batch Convert Selected Files**, multi-select files in the picker,
-and the browser uploads them to the local server.
+When more than one file is selected and at least one is a `.docx`, Markdown
+Studio converts the `.docx` files sequentially so Docling is not overloaded.
+Non-`.docx` files are skipped and counted in the status line, for example:
+`3 documents queued · 7 non-docx files skipped`.
 
-### 2. Folder picker (browser upload)
+The batch screen shows live progress, a per-file status list, and failure
+details when an individual file cannot be converted. Successfully converted
+filenames become clickable; click any ✅ result to open that Markdown in the
+existing editor/preview workspace. **Convert More** returns to the upload zone,
+and **Open Output Folder** opens `<project folder>\Outputs` in Windows Explorer.
 
-Click **Batch Convert Folder**, pick a folder, and the browser uploads
-every `.docx` inside it.
+If multiple Markdown files are selected without any `.docx` files, the app
+opens the first Markdown file and shows a notice.
 
-### 3. Scan a folder on disk (no upload)
+## Screenshots / GIFs
 
-Best for large folders or files that already live on this machine — the
-server reads them directly from disk, no browser upload step:
-
-1. Paste an absolute folder path into the **folder path** field
-   (e.g. `C:\Docs\Specs`).
-2. Leave **Include subfolders** checked to scan recursively, or uncheck
-   for the top level only.
-3. Click **Scan Folder & Convert**.
-
-The server enumerates every `.docx` under that path (skipping Word lock
-files like `~$Draft.docx`) and converts each one. Because the app only
-binds to `127.0.0.1`, this option is safe — no remote caller can reach
-the endpoint.
+No screenshots or GIFs are currently referenced in this README. If UI images
+are added later, capture new ones for the folder picker, drag/drop batch flow,
+and per-file progress screen.
 
 ## Stopping the server
 

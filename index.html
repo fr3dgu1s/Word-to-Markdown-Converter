@@ -142,6 +142,65 @@
         .batch-status details { margin-top: 0.55rem; }
         .batch-status details summary { cursor: pointer; color: var(--color-text-muted); }
 
+        .file-select-row {
+            text-align: center; margin-top: 0.7rem; font-size: 0.86rem; color: var(--color-text-muted);
+        }
+        .file-select-link {
+            background: none; border: none; color: var(--color-primary); cursor: pointer;
+            font: inherit; font-weight: 700; padding: 0; text-decoration: underline;
+        }
+        .file-select-link:hover { color: var(--color-primary-h); }
+
+        .batch-panel {
+            border: 1px solid var(--color-border); border-radius: var(--radius-md);
+            background: var(--color-surface-alt); padding: 1.1rem;
+        }
+        .batch-panel h3 { margin: 0 0 0.35rem; color: var(--color-text); }
+        .batch-summary {
+            color: var(--color-text-muted); font-size: 0.88rem; margin-bottom: 0.75rem;
+        }
+        .batch-status-line {
+            color: var(--color-text); font-size: 0.9rem; font-weight: 600; margin-bottom: 0.55rem;
+        }
+        .batch-progress {
+            height: 9px; background: var(--color-border); border-radius: 999px;
+            overflow: hidden; margin-bottom: 0.85rem;
+        }
+        .batch-progress-bar {
+            width: 0; height: 100%; background: var(--color-primary);
+            transition: width 0.2s ease;
+        }
+        .batch-file-list {
+            max-height: 240px; overflow-y: auto; background: var(--color-surface);
+            border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+        }
+        .batch-file-row {
+            display: flex; align-items: center; gap: 0.55rem;
+            padding: 0.5rem 0.7rem; border-bottom: 1px solid var(--color-border);
+            font-size: 0.86rem;
+        }
+        .batch-file-row:last-child { border-bottom: none; }
+        .batch-file-icon { width: 1.3rem; text-align: center; flex-shrink: 0; }
+        .batch-file-name {
+            flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .batch-file-link {
+            background: none; border: none; color: var(--color-primary); cursor: pointer;
+            font: inherit; font-weight: 600; padding: 0; text-align: left; text-decoration: underline;
+        }
+        .batch-file-link:hover { color: var(--color-primary-h); }
+        .batch-file-error {
+            color: var(--color-danger); font-size: 0.78rem; margin-left: auto;
+            max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .batch-actions {
+            display: flex; justify-content: flex-end; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.9rem;
+        }
+        .batch-actions button {
+            border: none; padding: 0.42rem 0.85rem; border-radius: var(--radius-sm);
+            font-weight: 600; cursor: pointer; font-size: 0.82rem; transition: background 0.15s;
+        }
+
         /* ── Loader ─────────────────────────────────────────────────────────── */
         .loader { text-align: center; padding: 3rem; font-size: 1.1rem; color: var(--color-text-muted); }
 
@@ -438,54 +497,42 @@
         </div>
 
         <div id="step-upload">
-            <div class="upload-area" id="drop-zone" onclick="document.getElementById('file-input').click()">
+            <div class="upload-area" id="drop-zone" onclick="document.getElementById('folder-input').click()">
                 <div class="drop-icon">📄</div>
-                <h3>Drag &amp; Drop a .docx or .md file</h3>
-                <p>Or click to browse a single file</p>
-                <input type="file" id="file-input" accept=".docx,.DOCX,.md,.MD,.txt" class="hidden" />
-                <input type="file" id="batch-file-input" accept=".docx,.DOCX" multiple class="hidden" />
-                <input type="file" id="folder-input" accept=".docx,.DOCX" webkitdirectory directory multiple class="hidden" />
+                <h3>Drag &amp; Drop files or folders</h3>
+                <p>Or click to choose a folder and convert every .docx inside it</p>
+                <input type="file" id="folder-input" webkitdirectory directory multiple class="hidden" />
+                <input type="file" id="file-input" accept=".docx,.DOCX,.md,.MD,.txt" multiple class="hidden" />
             </div>
 
-            <div class="upload-divider">
-                <div class="upload-divider-line"></div>
-                <span class="upload-divider-text">or convert many at once</span>
-                <div class="upload-divider-line"></div>
+            <div class="file-select-row">
+                Want individual files instead?
+                <button type="button" class="file-select-link" onclick="event.stopPropagation(); document.getElementById('file-input').click();">
+                    Select files
+                </button>
             </div>
-
-            <div class="batch-cards">
-
-                <div class="batch-card">
-                    <div class="batch-card-icon">📂</div>
-                    <div class="batch-card-title">Select files</div>
-                    <div class="batch-card-sub">Pick multiple .docx files from any location</div>
-                    <button type="button" onclick="event.stopPropagation(); document.getElementById('batch-file-input').click();">
-                        Choose files
-                    </button>
-                </div>
-
-                <div class="batch-card">
-                    <div class="batch-card-icon">📁</div>
-                    <div class="batch-card-title">Select folder</div>
-                    <div class="batch-card-sub">Convert all .docx files in a folder</div>
-                    <label class="subfolder-toggle">
-                        <input type="checkbox" id="folder-recursive" checked />
-                        Include subfolders
-                    </label>
-                    <button type="button" onclick="event.stopPropagation(); document.getElementById('folder-input').click();">
-                        Choose folder
-                    </button>
-                </div>
-
-            </div>
-
-            <div id="batch-status" class="batch-status hidden"></div>
         </div>
 
         <div id="step-loading" class="loader hidden">
             <div class="spin" style="width:32px;height:32px;border-width:3px;margin:0 auto 1rem;"></div>
             <h3 id="loading-title" style="margin:0;">AI is processing your document…</h3>
             <p id="loading-subtitle" style="color:var(--color-text-muted);">Extracting text, tables, and formatting.</p>
+        </div>
+
+        <div id="step-batch" class="hidden">
+            <div class="batch-panel">
+                <h3>Batch conversion</h3>
+                <div id="batch-summary" class="batch-summary"></div>
+                <div id="batch-status-line" class="batch-status-line"></div>
+                <div class="batch-progress" aria-label="Batch conversion progress">
+                    <div id="batch-progress-bar" class="batch-progress-bar"></div>
+                </div>
+                <div id="batch-file-list" class="batch-file-list"></div>
+                <div class="batch-actions">
+                    <button id="batch-convert-more" class="btn-secondary" type="button">Convert More</button>
+                    <button id="batch-open-folder" class="btn-primary" type="button">Open Output Folder</button>
+                </div>
+            </div>
         </div>
 
         <div id="step-workspace" class="hidden">
@@ -572,6 +619,12 @@
 </div>
 
 <script>
+const API_BASE = 'http://127.0.0.1:8000';
+
+function apiUrl(path) {
+    return `${API_BASE}${path.startsWith('/') ? path : `/${path}`}`;
+}
+
 function getEffectiveTheme() {
     if (document.documentElement.classList.contains('force-dark')) return 'dark';
     if (document.documentElement.classList.contains('force-light')) return 'light';
@@ -609,15 +662,20 @@ function toggleTheme() {
 // LOCAL PANEL — refs & state
 // ═══════════════════════════════════════════════════════════════════════════
 const fileInput       = document.getElementById('file-input');
-const batchFileInput  = document.getElementById('batch-file-input');
 const folderInput     = document.getElementById('folder-input');
 const dropZone        = document.getElementById('drop-zone');
-const batchStatus     = document.getElementById('batch-status');
 const stepUpload      = document.getElementById('step-upload');
 const stepLoading     = document.getElementById('step-loading');
+const stepBatch       = document.getElementById('step-batch');
 const stepWorkspace   = document.getElementById('step-workspace');
 const loadingTitle    = document.getElementById('loading-title');
 const loadingSubtitle = document.getElementById('loading-subtitle');
+const batchSummary    = document.getElementById('batch-summary');
+const batchStatusLine = document.getElementById('batch-status-line');
+const batchProgressBar = document.getElementById('batch-progress-bar');
+const batchFileList   = document.getElementById('batch-file-list');
+const btnBatchMore    = document.getElementById('batch-convert-more');
+const btnBatchOpenFolder = document.getElementById('batch-open-folder');
 const markdownEditor  = document.getElementById('markdown-editor');
 const visualPreview   = document.getElementById('visual-preview');
 const btnTabEdit      = document.getElementById('btn-tab-edit');
@@ -641,6 +699,7 @@ let currentOutputFile = null;
 let serverSavedPath   = null;
 let isServerDoc       = false;
 let isDirty           = false;
+let batchItems        = [];
 
 function escapeHtml(s) {
     return String(s == null ? '' : s)
@@ -654,7 +713,7 @@ function escapeHtml(s) {
     if (!bar) return;
     bar.classList.remove('hidden');
     function check() {
-        fetch('/api/status')
+        fetch(apiUrl('/api/status'))
             .then(r => r.ok ? r.json() : null)
             .then(data => {
                 if (data && data.converter_ready) { bar.classList.add('hidden'); }
@@ -670,15 +729,10 @@ function setLoadingState(title, subtitle) {
     loadingSubtitle.textContent = subtitle;
 }
 
-function showBatchStatus(html) {
-    batchStatus.innerHTML = html;
-    batchStatus.classList.remove('hidden');
-}
-
 // ── GitHub update check ───────────────────────────────────────────────────
 (function checkForUpdates() {
     if (!updateBanner || !updateMessage || !updateLink) return;
-    fetch('/api/update-check', { cache: 'no-store' })
+    fetch(apiUrl('/api/update-check'), { cache: 'no-store' })
         .then(r => r.ok ? r.json() : null)
         .then(data => {
             if (!data || !data.update_available || !data.latest_sha) return;
@@ -722,7 +776,7 @@ function clearDirty() {
     if (dot) dot.remove();
 }
 
-// ── Drag & Drop ───────────────────────────────────────────────────────────
+// ── Drag & Drop / selection routing ───────────────────────────────────────
 ['dragenter','dragover','dragleave','drop'].forEach(ev => {
     dropZone.addEventListener(ev, e => { e.preventDefault(); e.stopPropagation(); });
     document.body.addEventListener(ev, e => { e.preventDefault(); e.stopPropagation(); });
@@ -730,36 +784,121 @@ function clearDirty() {
 ['dragenter','dragover'].forEach(ev => dropZone.addEventListener(ev, () => dropZone.classList.add('dragover')));
 ['dragleave','drop'].forEach(ev =>     dropZone.addEventListener(ev, () => dropZone.classList.remove('dragover')));
 
-function processFile(file) {
-    if (!file) return;
-    const name = file.name.toLowerCase();
-    if (name.endsWith('.docx'))                             startDocxConversion(file);
-    else if (name.endsWith('.md') || name.endsWith('.txt')) openLocalMarkdown(file);
-    else alert('Please drop a valid .docx or .md file!');
-}
-function processFiles(fileList, sourceLabel = 'selected files', forceBatch = false) {
-    const files = Array.from(fileList || []);
-    if (!files.length) return;
-    if (files.length === 1 && !forceBatch) { processFile(files[0]); return; }
-    startBatchConversion(files, sourceLabel);
+function isDocxFile(file) {
+    return file?.name?.toLowerCase().endsWith('.docx');
 }
 
-dropZone.addEventListener('drop', e => processFiles(e.dataTransfer.files, 'dropped files'));
-fileInput.addEventListener('change', e => processFile(e.target.files[0]));
-batchFileInput.addEventListener('change', e => { processFiles(e.target.files, 'selected files', true); batchFileInput.value = ''; });
-folderInput.addEventListener('change',    e => { processFiles(e.target.files, 'folder', true);          folderInput.value    = ''; });
+function isMarkdownFile(file) {
+    const name = file?.name?.toLowerCase() || '';
+    return name.endsWith('.md') || name.endsWith('.txt');
+}
+
+function getDisplayName(file) {
+    return file?._relativePath || file?.webkitRelativePath || file?.name || '(unknown file)';
+}
+
+function processFile(file) {
+    if (!file) return;
+    if (isDocxFile(file)) startDocxConversion(file);
+    else if (isMarkdownFile(file)) openLocalMarkdown(file);
+    else alert('No .docx or .md files found');
+}
+
+function handleSelection(fileList, sourceLabel = 'selected files') {
+    const files = Array.from(fileList || []).filter(Boolean);
+    const relevantFiles = files.filter(file => isDocxFile(file) || isMarkdownFile(file));
+    const docxFiles = files.filter(isDocxFile);
+    const markdownFiles = files.filter(isMarkdownFile);
+
+    if (!relevantFiles.length) {
+        alert('No .docx or .md files found');
+        return;
+    }
+
+    if (files.length === 1) {
+        processFile(relevantFiles[0]);
+        return;
+    }
+
+    if (docxFiles.length) {
+        startBatchConversion(files, sourceLabel);
+        return;
+    }
+
+    if (markdownFiles.length) {
+        alert('Multiple Markdown files selected. Opening the first one.');
+        openLocalMarkdown(markdownFiles[0]);
+    }
+}
+
+function readEntries(reader) {
+    return new Promise((resolve, reject) => {
+        const entries = [];
+        function readBatch() {
+            reader.readEntries(batch => {
+                if (!batch.length) {
+                    resolve(entries);
+                    return;
+                }
+                entries.push(...batch);
+                readBatch();
+            }, reject);
+        }
+        readBatch();
+    });
+}
+
+async function walkEntry(entry, parentPath = '') {
+    if (!entry) return [];
+    const entryPath = parentPath ? `${parentPath}/${entry.name}` : entry.name;
+    if (entry.isFile) {
+        return new Promise((resolve, reject) => {
+            entry.file(file => {
+                try { file._relativePath = entryPath; } catch (_) {}
+                resolve([file]);
+            }, reject);
+        });
+    }
+    if (entry.isDirectory) {
+        const entries = await readEntries(entry.createReader());
+        const nested = await Promise.all(entries.map(child => walkEntry(child, entryPath)));
+        return nested.flat();
+    }
+    return [];
+}
+
+async function getDroppedFiles(dataTransfer) {
+    const items = Array.from(dataTransfer?.items || []);
+    const entries = items
+        .map(item => item.webkitGetAsEntry ? item.webkitGetAsEntry() : null)
+        .filter(Boolean);
+    if (!entries.length) return Array.from(dataTransfer?.files || []);
+    const nested = await Promise.all(entries.map(entry => walkEntry(entry)));
+    return nested.flat();
+}
+
+dropZone.addEventListener('drop', async e => {
+    try {
+        const files = await getDroppedFiles(e.dataTransfer);
+        handleSelection(files, 'dropped files');
+    } catch (err) {
+        alert('Could not read dropped files: ' + err.message);
+    }
+});
+fileInput.addEventListener('change', e => { handleSelection(e.target.files, 'selected files'); fileInput.value = ''; });
+folderInput.addEventListener('change', e => { handleSelection(e.target.files, 'folder'); folderInput.value = ''; });
 
 // ── Single docx conversion ────────────────────────────────────────────────
 function startDocxConversion(file) {
     setLoadingState('AI is processing your document…', 'Extracting text, tables, and formatting.');
-    batchStatus.classList.add('hidden');
     stepUpload.classList.add('hidden');
+    stepBatch.classList.add('hidden');
     stepLoading.classList.remove('hidden');
 
     const formData = new FormData();
     formData.append('file', file);
 
-    fetch('/api/convert', { method: 'POST', body: formData })
+    fetch(apiUrl('/api/convert'), { method: 'POST', body: formData })
         .then(async r => {
             if (!r.ok) {
                 let msg = 'Server error. Is the Python server running?';
@@ -789,143 +928,157 @@ function startDocxConversion(file) {
         .catch(err => { alert('Conversion failed: ' + err.message); resetApp(); });
 }
 
-// ── Batch conversion ──────────────────────────────────────────────────────
-function renderBatchResult(data, headerLabel) {
+// ── Sequential batch conversion ───────────────────────────────────────────
+function batchIcon(status) {
+    if (status === 'in-progress') return '🔄';
+    if (status === 'success') return '✅';
+    if (status === 'failure') return '❌';
+    return '⏳';
+}
+
+function renderBatchList() {
+    batchFileList.innerHTML = batchItems.map(item => {
+        const name = escapeHtml(item.displayName);
+        const icon = batchIcon(item.status);
+        const fileName = item.status === 'success'
+            ? `<button type="button" class="batch-file-link" data-batch-open="${item.id}">${name}</button>`
+            : `<span class="batch-file-name" title="${name}">${name}</span>`;
+        const error = item.error ? `<span class="batch-file-error" title="${escapeHtml(item.error)}">${escapeHtml(item.error)}</span>` : '';
+        return `<div class="batch-file-row">
+            <span class="batch-file-icon">${icon}</span>
+            ${fileName}
+            ${error}
+        </div>`;
+    }).join('');
+}
+
+function updateBatchProgress(completed, total) {
+    const percentage = total ? Math.round((completed / total) * 100) : 0;
+    batchProgressBar.style.width = `${percentage}%`;
+}
+
+function showBatchView() {
+    stepUpload.classList.add('hidden');
     stepLoading.classList.add('hidden');
     stepWorkspace.classList.add('hidden');
-    stepUpload.classList.remove('hidden');
-
-    const converted = data.converted_files || [];
-    const failed    = data.failed_files    || [];
-    const outputDir = data.output_dir || '';
-    const scanned   = (typeof data.scanned_count === 'number') ? data.scanned_count : null;
-    const scannedFolder = data.scanned_folder || '';
-
-    const parts = [
-        `<strong>${escapeHtml(headerLabel)}</strong> Output: ${escapeHtml(outputDir)}`,
-    ];
-    if (scannedFolder) {
-        parts.push(`<div>Scanned folder: <code>${escapeHtml(scannedFolder)}</code></div>`);
-    }
-    parts.push(`<ul>`);
-    if (scanned !== null) {
-        parts.push(`<li><strong>${scanned}</strong> .docx file(s) found.</li>`);
-    }
-    parts.push(`<li><strong>${converted.length}</strong> file(s) converted and saved.</li>`);
-    parts.push(`<li><strong>${failed.length}</strong> file(s) failed.</li>`);
-    parts.push(`</ul>`);
-
-    if (converted.length) {
-        parts.push(`<details><summary>Converted files</summary><ul>`);
-        converted.forEach(c => {
-            const inputName  = (c.input  || '').split(/[\\/]/).pop();
-            const outputName = (c.output || '').split(/[\\/]/).pop();
-            parts.push(`<li>${escapeHtml(inputName)} &rarr; ${escapeHtml(outputName)}</li>`);
-        });
-        parts.push(`</ul></details>`);
-    }
-
-    if (failed.length) {
-        parts.push(`<div class="failed-block"><strong>Failed files:</strong><ul>`);
-        failed.forEach(f => {
-            const inputName = (f.input || '').split(/[\\/]/).pop() || '(unknown)';
-            parts.push(`<li><strong>${escapeHtml(inputName)}</strong>: ${escapeHtml(f.error || 'Unknown error')}</li>`);
-        });
-        parts.push(`</ul></div>`);
-    }
-
-    showBatchStatus(parts.join(''));
-    if (converted.length) openFolder();
+    stepBatch.classList.remove('hidden');
 }
 
-function startBatchConversion(files, sourceLabel = 'selected files') {
-    const docxFiles = files.filter(f => f.name.toLowerCase().endsWith('.docx'));
-    if (!docxFiles.length) { alert('Batch conversion supports .docx files only.'); return; }
+function getBatchFailureMessage(error) {
+    if (error instanceof Error) return error.message;
+    return String(error || 'Unknown error');
+}
 
-    setLoadingState('Batch conversion in progress…', `Converting ${docxFiles.length} .docx files from ${sourceLabel}.`);
-    stepUpload.classList.add('hidden');
-    stepLoading.classList.remove('hidden');
-
+async function convertBatchFile(item) {
     const formData = new FormData();
-    docxFiles.forEach(f => formData.append('files', f));
+    formData.append('file', item.file);
 
-    fetch('/api/convert-batch', { method: 'POST', body: formData })
-        .then(async r => {
-            if (!r.ok) {
-                let msg = 'Server error during batch conversion.';
-                try {
-                    const p = await r.json();
-                    if (p?.detail?.message) msg = p.detail.message;
-                    else if (typeof p?.detail === 'string') msg = p.detail;
-                } catch (_) {}
-                throw new Error(msg);
-            }
-            return r.json();
-        })
-        .then(data => renderBatchResult(data, 'Batch conversion finished.'))
-        .catch(err => {
-            stepLoading.classList.add('hidden');
-            stepUpload.classList.remove('hidden');
-            alert('Batch conversion failed: ' + err.message);
-        });
+    const response = await fetch(apiUrl('/api/convert'), { method: 'POST', body: formData });
+    if (!response.ok) {
+        let msg = 'Server error during conversion.';
+        try {
+            const payload = await response.json();
+            if (typeof payload?.detail === 'string') msg = payload.detail;
+            else if (payload?.detail?.message) msg = payload.detail.message;
+        } catch (_) {}
+        throw new Error(msg);
+    }
+
+    const data = await response.json();
+    if (data.error) throw new Error(data.error);
+    return data;
 }
 
-// ── Server-side folder scan ───────────────────────────────────────────────
-function scanFolderAndConvert() {
-    const pathInput     = document.getElementById('folder-path-input');
-    const recursiveBox  = document.getElementById('folder-recursive');
-    const folderPath    = (pathInput?.value || '').trim();
-    if (!folderPath) {
-        alert('Enter a folder path on this machine (e.g. C:\\Docs\\Specs).');
-        pathInput?.focus();
+async function startBatchConversion(files, sourceLabel = 'selected files') {
+    const allFiles = Array.from(files || []).filter(Boolean);
+    const docxFiles = allFiles.filter(isDocxFile);
+    const skippedCount = allFiles.length - docxFiles.length;
+
+    if (!docxFiles.length) {
+        alert('No .docx or .md files found');
         return;
     }
-    const recursive = !!recursiveBox?.checked;
 
-    setLoadingState('Scanning folder…', `Looking for .docx files in ${folderPath}`);
-    batchStatus.classList.add('hidden');
-    stepUpload.classList.add('hidden');
-    stepLoading.classList.remove('hidden');
+    batchItems = docxFiles.map((file, index) => ({
+        id: String(index),
+        file,
+        displayName: getDisplayName(file),
+        status: 'pending',
+        markdown: '',
+        docName: '',
+        outputFile: '',
+        serverSavedPath: '',
+        error: '',
+    }));
 
-    fetch('/api/convert-folder', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ folder_path: folderPath, recursive: recursive }),
-    })
-        .then(async r => {
-            if (!r.ok) {
-                let msg = 'Server error during folder scan.';
-                try {
-                    const p = await r.json();
-                    if (typeof p?.detail === 'string') msg = p.detail;
-                    else if (p?.detail?.message) msg = p.detail.message;
-                } catch (_) {}
-                throw new Error(msg);
-            }
-            return r.json();
-        })
-        .then(data => {
-            if ((data.scanned_count || 0) === 0) {
-                stepLoading.classList.add('hidden');
-                stepUpload.classList.remove('hidden');
-                showBatchStatus(
-                    `<strong>No .docx files found</strong> in <code>${escapeHtml(data.scanned_folder || folderPath)}</code>` +
-                    (recursive ? ' (including subfolders).' : ' (top level only).')
-                );
-                return;
-            }
-            renderBatchResult(data, 'Folder scan finished.');
-        })
-        .catch(err => {
-            stepLoading.classList.add('hidden');
-            stepUpload.classList.remove('hidden');
-            alert('Folder scan failed: ' + err.message);
-        });
+    batchSummary.textContent =
+        `${docxFiles.length} document${docxFiles.length === 1 ? '' : 's'} queued · ` +
+        `${skippedCount} non-docx file${skippedCount === 1 ? '' : 's'} skipped`;
+    batchStatusLine.textContent = `Ready to convert ${docxFiles.length} document${docxFiles.length === 1 ? '' : 's'} from ${sourceLabel}.`;
+    updateBatchProgress(0, docxFiles.length);
+    renderBatchList();
+    showBatchView();
+
+    let completed = 0;
+    let succeeded = 0;
+    let failed = 0;
+
+    for (const item of batchItems) {
+        item.status = 'in-progress';
+        batchStatusLine.textContent = `Converting ${completed + 1} of ${docxFiles.length}: ${item.displayName}`;
+        renderBatchList();
+
+        try {
+            const data = await convertBatchFile(item);
+            item.status = 'success';
+            item.markdown = data.markdown || '';
+            item.docName = data.doc_name || item.file.name.replace(/\.[^/.]+$/, '');
+            item.outputFile = data.output_file || '';
+            item.serverSavedPath = data.output_file
+                || (data.output_dir ? data.output_dir + '\\' + item.docName + '.md' : 'Server Outputs folder');
+            succeeded += 1;
+        } catch (error) {
+            item.status = 'failure';
+            item.error = getBatchFailureMessage(error);
+            failed += 1;
+        }
+
+        completed += 1;
+        updateBatchProgress(completed, docxFiles.length);
+        renderBatchList();
+    }
+
+    batchStatusLine.textContent =
+        `Finished: ${succeeded} converted · ${failed} failed · ${skippedCount} skipped`;
 }
+
+function openBatchResult(itemId) {
+    const item = batchItems.find(candidate => candidate.id === itemId);
+    if (!item || item.status !== 'success') return;
+
+    markdownEditor.value = item.markdown;
+    currentFileName = item.docName;
+    currentOutputFile = item.outputFile || null;
+    serverSavedPath = item.serverSavedPath || item.outputFile || 'Server Outputs folder';
+    isServerDoc = true;
+    clearDirty();
+    stepBatch.classList.add('hidden');
+    stepWorkspace.classList.remove('hidden');
+    btnOpenFolder.classList.remove('hidden');
+    btnTabEdit.click();
+    updatePreview();
+}
+
+batchFileList.addEventListener('click', e => {
+    const btn = e.target instanceof Element ? e.target.closest('[data-batch-open]') : null;
+    if (btn) openBatchResult(btn.dataset.batchOpen);
+});
+
+btnBatchMore.addEventListener('click', resetApp);
+btnBatchOpenFolder.addEventListener('click', openFolder);
 
 // ── Local .md file ────────────────────────────────────────────────────────
 function openLocalMarkdown(file) {
-    batchStatus.classList.add('hidden');
     const reader = new FileReader();
     reader.onload = e => {
         markdownEditor.value = e.target.result;
@@ -934,6 +1087,8 @@ function openLocalMarkdown(file) {
         isServerDoc     = false;
         clearDirty();
         stepUpload.classList.add('hidden');
+        stepLoading.classList.add('hidden');
+        stepBatch.classList.add('hidden');
         stepWorkspace.classList.remove('hidden');
         btnOpenFolder.classList.add('hidden');
         btnTabPreview.click();
@@ -1311,7 +1466,7 @@ function _genericTable(rows) {
 }
 
 function stopService() {
-    fetch('/api/shutdown', { method: 'POST' })
+    fetch(apiUrl('/api/shutdown'), { method: 'POST' })
         .finally(() => { window.location.href = 'about:blank'; });
 }
 
@@ -1323,7 +1478,7 @@ btnCopy.addEventListener('click', () => {
     });
 });
 
-function openFolder() { fetch('/api/open-folder').catch(() => {}); }
+function openFolder() { fetch(apiUrl('/api/open-folder')).catch(() => {}); }
 btnOpenFolder.addEventListener('click', () => {
     openFolder();
     const orig = btnOpenFolder.textContent;
@@ -1359,7 +1514,7 @@ function closeModal() { saveModal.classList.add('hidden'); }
 
 function confirmSave() {
     closeModal();
-    fetch('/api/save-changes', {
+    fetch(apiUrl('/api/save-changes'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ doc_name: currentFileName, output_file: currentOutputFile, markdown: markdownEditor.value }),
@@ -1400,17 +1555,22 @@ function doLocalSave() {
 }
 
 function resetApp() {
-    fileInput.value = batchFileInput.value = folderInput.value = '';
+    fileInput.value = folderInput.value = '';
     markdownEditor.value = '';
     visualPreview.innerHTML = '';
     currentFileName = currentOutputFile = serverSavedPath = null;
     isServerDoc = false;
+    batchItems = [];
+    batchSummary.textContent = '';
+    batchStatusLine.textContent = '';
+    batchProgressBar.style.width = '0';
+    batchFileList.innerHTML = '';
     clearDirty();
-    batchStatus.classList.add('hidden');
     btnOpenFolder.classList.add('hidden');
     btnTabEdit.click();
     stepWorkspace.classList.add('hidden');
     stepLoading.classList.add('hidden');
+    stepBatch.classList.add('hidden');
     stepUpload.classList.remove('hidden');
 }
 
@@ -1434,7 +1594,7 @@ function toggleLogs() {
 
 async function loadLogs() {
     try {
-        const data = await fetch('/logs/latest?lines=100').then(r => r.json());
+        const data = await fetch(apiUrl('/logs/latest?lines=100')).then(r => r.json());
         const el = document.getElementById('log-lines');
         if (!data.lines || data.lines.length === 0) {
             el.innerHTML = '<div class="log-empty">No log entries yet.</div>';
@@ -1452,7 +1612,7 @@ async function loadLogs() {
 }
 
 async function clearLogs() {
-    await fetch('/logs/latest', { method: 'DELETE' });
+    await fetch(apiUrl('/logs/latest'), { method: 'DELETE' });
     loadLogs();
 }
 

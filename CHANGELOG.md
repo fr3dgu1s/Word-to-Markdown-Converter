@@ -3,6 +3,14 @@
 All notable user-facing changes for the Word-to-Markdown Converter are tracked
 here.
 
+## Unreleased
+
+### Added
+
+- Batch conversion: folder picker, multi-file drag/drop, recursive folder
+  walking, sequential per-file conversion, live progress UI, and clickable
+  converted results.
+
 ## 2026-05-05
 
 ### Added
