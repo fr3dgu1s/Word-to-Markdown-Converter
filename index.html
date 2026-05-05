@@ -335,9 +335,13 @@
         }
 
         .top-theme-toggle {
+            display: inline-flex; align-items: center; gap: 0.35rem;
             background: none; border: none; cursor: pointer;
-            font-size: 1rem; padding: 0 0.25rem;
+            color: var(--color-text-muted); font-size: 0.85rem; font-weight: 600;
+            padding: 0 0.25rem;
         }
+        .top-theme-toggle:hover { color: var(--color-primary); }
+        .top-theme-icon { font-size: 1rem; line-height: 1; }
 
         html.force-dark {
             --color-bg:             #0f1117;
@@ -361,6 +365,28 @@
             --color-text-warning:   #fbbf24;
         }
 
+        html.force-light {
+            --color-bg:             #f3f4f6;
+            --color-surface:        #ffffff;
+            --color-surface-alt:    #f9fafb;
+            --color-border:         #d1d5db;
+            --color-text:           #111827;
+            --color-text-muted:     #4b5563;
+            --color-primary:        #2563eb;
+            --color-primary-h:      #1d4ed8;
+            --color-danger:         #dc2626;
+            --color-danger-h:       #b91c1c;
+            --color-success:        #16a34a;
+            --color-warn-bg:        #fffbeb;
+            --color-warn-border:    #fde68a;
+            --color-warn-text:      #92400e;
+            --shadow-card:          0 2px 8px rgba(0,0,0,0.07);
+            --color-text-success:   #16a34a;
+            --color-text-secondary: #4b5563;
+            --color-text-danger:    #dc2626;
+            --color-text-warning:   #b45309;
+        }
+
         @media (max-width: 480px) {
             .batch-cards { flex-direction: column; }
         }
@@ -370,11 +396,11 @@
 
 <div class="card">
     <div class="top-bar">
-        <span></span>
-        <div style="display:flex; align-items:center; gap:0.5rem;">
-            <button class="top-theme-toggle" id="theme-toggle-btn" onclick="toggleTheme()" title="Toggle dark/light mode">☀️</button>
-            <button class="top-shutdown" onclick="stopService()">Stop Python App</button>
-        </div>
+        <button class="top-theme-toggle" id="theme-toggle-btn" onclick="toggleTheme()" title="Toggle dark/light mode">
+            <span class="top-theme-icon" id="theme-toggle-icon" aria-hidden="true">☀️</span>
+            <span>Theme</span>
+        </button>
+        <button class="top-shutdown" onclick="stopService()">Stop Python App</button>
     </div>
 
     <div class="hero-banner">
@@ -546,21 +572,36 @@
 </div>
 
 <script>
+function getEffectiveTheme() {
+    if (document.documentElement.classList.contains('force-dark')) return 'dark';
+    if (document.documentElement.classList.contains('force-light')) return 'light';
+    return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+
+function updateThemeButton(theme) {
+    const icon = document.getElementById('theme-toggle-icon');
+    if (icon) icon.textContent = theme === 'dark' ? '🌙' : '☀️';
+}
+
+function applyTheme(theme) {
+    const root = document.documentElement;
+    root.classList.remove('force-dark', 'force-light');
+    root.classList.add(theme === 'dark' ? 'force-dark' : 'force-light');
+    updateThemeButton(theme);
+    localStorage.setItem('md-studio-theme', theme);
+}
+
 function toggleTheme() {
-    const isDark = document.documentElement.classList.toggle('force-dark');
-    document.getElementById('theme-toggle-btn').textContent = isDark ? '🌙' : '☀️';
-    localStorage.setItem('md-studio-theme', isDark ? 'dark' : 'light');
+    applyTheme(getEffectiveTheme() === 'dark' ? 'light' : 'dark');
 }
 
 // Apply saved theme preference on load
 (function () {
     const saved = localStorage.getItem('md-studio-theme');
-    if (saved === 'dark') {
-        document.documentElement.classList.add('force-dark');
-        window.addEventListener('DOMContentLoaded', function () {
-            const btn = document.getElementById('theme-toggle-btn');
-            if (btn) btn.textContent = '🌙';
-        });
+    if (saved === 'dark' || saved === 'light') {
+        applyTheme(saved);
+    } else {
+        updateThemeButton(getEffectiveTheme());
     }
 })();
 
