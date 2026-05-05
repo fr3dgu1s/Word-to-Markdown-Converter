@@ -1,15 +1,15 @@
 # scripts/setup-windows.ps1
 # One-shot Windows setup for the Word-to-Markdown Converter.
 #
-# - Creates portable runtime folders under C:\temp\W2MD
+# - Creates portable runtime folders under the app folder by default
 # - Copies .env.example to .env if missing
 # - Publishes the C# MipHelper project (net8.0, win-x64, framework-dependent)
-# - Copies MipHelper.exe to C:\temp\W2MD\MipHelper\MipHelper.exe
+# - Copies MipHelper.exe to <app folder>\MipHelper\MipHelper.exe
 # - Validates the final layout
 
 [CmdletBinding()]
 param(
-    [string]$AppDataRoot = 'C:\temp\W2MD',
+    [string]$AppDataRoot = '',
     [switch]$SkipPublish
 )
 
@@ -20,8 +20,13 @@ function Write-Step($msg) {
     Write-Host "==> $msg" -ForegroundColor Cyan
 }
 
-# Resolve repo root (this script lives in /scripts).
-$RepoRoot = Resolve-Path (Join-Path $PSScriptRoot '..')
+# Resolve app root and archive root (this script lives in /archive/scripts).
+$RepoRoot = Resolve-Path (Join-Path $PSScriptRoot '..\..')
+$ArchiveRoot = Resolve-Path (Join-Path $PSScriptRoot '..')
+
+if ([string]::IsNullOrWhiteSpace($AppDataRoot)) {
+    $AppDataRoot = $RepoRoot.Path
+}
 
 $Folders = @(
     $AppDataRoot,
@@ -58,7 +63,7 @@ if (-not (Test-Path $envPath)) {
 
 if (-not $SkipPublish) {
     Write-Step "Publishing MipHelper (net8.0 / win-x64, framework-dependent)"
-    $csproj = Join-Path $RepoRoot 'MipHelper\MipHelper.csproj'
+    $csproj = Join-Path $ArchiveRoot 'MipHelper\MipHelper.csproj'
     if (-not (Test-Path $csproj)) {
         throw "MipHelper.csproj not found at $csproj"
     }
@@ -69,7 +74,7 @@ if (-not $SkipPublish) {
         throw "dotnet publish failed (exit code $LASTEXITCODE)."
     }
 
-    $publishDir = Join-Path $RepoRoot 'MipHelper\bin\Release\net8.0\win-x64\publish'
+    $publishDir = Join-Path $ArchiveRoot 'MipHelper\bin\Release\net8.0\win-x64\publish'
     $destDir = Join-Path $AppDataRoot 'MipHelper'
 
     if (Test-Path $publishDir) {

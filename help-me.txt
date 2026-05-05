@@ -1,0 +1,613 @@
+Word-to-Markdown Converter: project guide
+=========================================
+
+Purpose
+-------
+This repository contains a local-only Windows application for converting Word
+.docx files into Markdown. The active app is intentionally simple:
+
+1. A FastAPI server in server.py runs on 127.0.0.1:8000.
+2. A single-page browser UI in index.html lets a user upload, batch convert,
+   preview, edit, save, copy, and open converted Markdown files.
+3. Docling performs the .docx-to-Markdown conversion locally.
+4. Runtime files default to the project/app folder containing paths.py.
+
+The app does not use cloud APIs, authentication, or external services in its
+current active runtime path. There is an archive folder containing older or
+future-looking work for Microsoft Graph, Microsoft Purview/MIP, RMS, and Word
+COM protected-document workflows. That archive code is not imported by the
+current server.py.
+
+
+Active runtime architecture
+---------------------------
+The active application has four layers:
+
+1. Launch layer
+   - launch_silent.vbs starts start_platform.py with pyw/pythonw and opens
+     loading.html.
+   - start_platform.py checks http://127.0.0.1:8000/health. If the server is
+     not reachable, it launches server.py as a detached no-window background
+     process.
+   - loading.html polls /health and redirects the browser to
+     http://127.0.0.1:8000 once FastAPI responds.
+   - stop_silent.vbs starts stop_platform.py silently.
+   - stop_platform.py posts to /api/shutdown.
+
+2. Server layer
+   - server.py creates the FastAPI app.
+   - It starts Docling initialization on a background thread at import time.
+   - It serves index.html and exposes conversion, save, folder-open, shutdown,
+     status, and log endpoints.
+   - It mounts /Outputs as static files so Markdown preview image links can
+     resolve to generated image files.
+
+3. Conversion layer
+   - _get_converter() waits for the background Docling initialization.
+   - convert_file_to_markdown() receives an uploaded file, spools it into
+     TEMP_ROOT, and delegates to _convert_docx_path_to_markdown().
+   - _convert_docx_path_to_markdown() runs Docling, extracts PictureItem images,
+     writes PNG files to OUTPUTS_ROOT\Images\<document-slug>, replaces Docling
+     IMAGE_TOKEN placeholders with Markdown image links, and writes the final
+     Markdown file to OUTPUTS_ROOT.
+   - Single conversion returns Markdown to the UI immediately.
+   - Batch and folder conversion write Markdown files only and return success
+     and failure summaries.
+
+4. Browser UI layer
+   - index.html is a self-contained HTML/CSS/JavaScript UI.
+   - It uses marked from jsDelivr to render Markdown preview.
+   - It uses Prism from cdnjs for code highlighting in preview.
+   - It supports drag/drop upload, selected-file batch upload, browser folder
+     upload, server-side folder scan, Markdown editing, visual preview, toolbar
+     insertion helpers, table cleanup, saving, copying, opening the output
+     folder, stopping the app, and viewing/clearing logs.
+
+
+Important data folders
+----------------------
+Default paths are defined in paths.py and described in .env.example:
+
+- APP_DATA_ROOT: <project folder>
+- OUTPUTS_ROOT: <project folder>\Outputs
+- IMAGES_ROOT: <project folder>\Outputs\Images
+- TEMP_ROOT: <project folder>\Temp
+- LOGS_ROOT: <project folder>\Logs
+
+paths.py loads .env via python-dotenv if available. Environment variables win
+over defaults. On import, paths.py creates all required runtime folders.
+
+
+Active file inventory
+---------------------
+.env.example
+    Documents runtime path settings. Copy to .env to override defaults.
+
+.gitignore
+    Ignores logs, __pycache__, Python bytecode, Outputs, egg-info, and .env.
+    Note: some generated Outputs and __pycache__ files are already tracked in
+    git history even though they are ignored for new changes.
+
+README.md
+    User-facing setup, run, conversion, batch, logs, and troubleshooting guide.
+
+requirements.txt
+    Python runtime dependencies: fastapi, uvicorn, python-multipart, pillow,
+    docling, and python-dotenv.
+
+paths.py
+    Central runtime path module. It loads .env, defines APP_DATA_ROOT,
+    OUTPUTS_ROOT, IMAGES_ROOT, TEMP_ROOT, LOGS_ROOT, and creates folders.
+
+logging_config.py
+    Configures root logging with a rotating file handler at
+    LOGS_ROOT\app.log and a console handler. server.py imports setup_logging()
+    and uses logger name wordtomd.
+
+server.py
+    Active local FastAPI backend. It owns Docling initialization, filename
+    safety helpers, conversion helpers, endpoints, static output serving,
+    request logging, save handling, folder scan, log tailing, log clearing, and
+    shutdown.
+
+index.html
+    Active browser UI. Contains all frontend layout, styling, state, API calls,
+    Markdown preview, toolbar behavior, table cleanup logic, save modal, log
+    viewer, and shutdown action.
+
+loading.html
+    Startup waiting page. It polls /health every few seconds and redirects to
+    the active app when ready. It shows an error after roughly five minutes.
+
+start_platform.py
+    Silent server launcher. It avoids launching duplicate server instances by
+    probing /health first, then starts server.py with pythonw where available.
+
+stop_platform.py
+    Silent stopper. It posts to /api/shutdown and intentionally ignores errors
+    so stopping is quiet if the server is already down.
+
+launch_silent.vbs
+    Windows double-click entry point. Runs start_platform.py via pyw -3 or
+    pythonw, then opens loading.html in the default browser.
+
+stop_silent.vbs
+    Windows double-click stop entry point. Runs stop_platform.py via pyw -3 or
+    pythonw.
+
+Outputs\Images\...
+    Tracked sample/generated image artifacts from previous conversions. The
+    active app writes new extracted image assets under the configured
+    IMAGES_ROOT, normally <project folder>\Outputs\Images.
+
+__pycache__\...
+    Tracked Python bytecode artifacts from previous runs. They are not source
+    and are not needed to understand or run the app.
+
+
+server.py object and endpoint map
+---------------------------------
+Global initialization:
+- logger = setup_logging()
+- app = FastAPI(title="Word-to-Markdown Converter")
+- _converter_ready = threading.Event()
+- _converter = None
+- _converter_error = None
+- threading.Thread(target=_init_converter, daemon=True).start()
+
+Docling lifecycle:
+- _init_converter()
+  Imports Docling, creates DocumentConverter, records any initialization error,
+  and sets _converter_ready.
+- _get_converter()
+  Waits up to 120 seconds for initialization, raises if Docling failed, and
+  returns the converter instance.
+
+Naming helpers:
+- safe_md_basename(stem)
+  Removes Windows-forbidden filename characters and trims unsafe trailing dots.
+- safe_image_dir(stem)
+  Creates a lowercase hyphen-separated slug for image folders.
+- batch_output_name(filename)
+  Converts "Spec.docx" into "Spec-BATCH.md".
+- single_output_name(filename)
+  Converts "Spec.docx" into "Spec.md".
+- _unique_path(folder, filename)
+  Avoids overwriting by appending -2, -3, and so on.
+- _unique_image_dir(stem_slug)
+  Avoids image folder collisions the same way.
+
+Core conversion:
+- _convert_docx_path_to_markdown(src_path, display_name, output_filename,
+  include_markdown=True)
+  Converts a local docx path, extracts pictures, writes Markdown and images, and
+  returns output metadata plus Markdown content when requested.
+- convert_file_to_markdown(upload_file, output_filename, include_markdown=True)
+  Writes UploadFile to a temporary .docx in TEMP_ROOT, delegates conversion, and
+  removes the temp upload file.
+
+Middleware:
+- global_exception_handler()
+  Logs uncaught errors and returns JSON with error, traceback, and path.
+- log_requests()
+  Logs every request start and response status with elapsed milliseconds.
+
+Endpoints:
+- GET /
+  Returns index.html.
+- GET /health
+  Returns {"ok": true}. Used by launch and loading pages.
+- GET /api/status
+  Returns whether Docling is ready and any initialization error.
+- POST /api/convert
+  Accepts one uploaded .docx, converts it, saves the .md file, and returns the
+  Markdown plus file paths for the editor.
+- POST /api/convert-batch
+  Accepts multiple uploaded .docx files, converts each with -BATCH suffix,
+  continues after individual failures, and returns converted/failed lists.
+- POST /api/convert-folder
+  Accepts JSON {"folder_path": "...", "recursive": true}. It scans a local
+  folder directly, skips Word lock files starting with ~$ and converts found
+  .docx files with -BATCH suffix.
+- POST /api/save-changes
+  Writes edited Markdown. If output_file is supplied, the path must resolve
+  inside OUTPUTS_ROOT to prevent path traversal. Otherwise doc_name is sanitized
+  and saved as OUTPUTS_ROOT\<doc_name>.md.
+- GET /api/open-folder
+  Calls os.startfile(OUTPUTS_ROOT) to open Windows Explorer.
+- POST /api/shutdown
+  Starts a daemon thread that sleeps one second and then calls os._exit(0).
+- GET /logs/latest?lines=100
+  Returns the last N log lines, clamped between 1 and 500.
+- DELETE /logs/latest
+  Truncates app.log and logs that the user cleared logs.
+
+
+Frontend object and function map
+--------------------------------
+Main DOM references:
+- fileInput, batchFileInput, folderInput, dropZone
+- batchStatus, stepUpload, stepLoading, stepWorkspace
+- loadingTitle, loadingSubtitle
+- markdownEditor, visualPreview
+- btnTabEdit, btnTabPreview, btnSave, btnCopy, btnOpenFolder
+- mdToolbar, saveModal, modalPath, modalTitle, modalDesc, modalWarn,
+  modalBtnCancel
+
+Main state:
+- currentFileName: current document stem.
+- currentOutputFile: server-side Markdown path returned by conversion.
+- serverSavedPath: path text shown in the save modal.
+- isServerDoc: true when the document came from server conversion.
+- isDirty: true after editor input since last save/clear.
+
+Startup and status:
+- pollConverterReady()
+  Polls /api/status and hides the warm-up banner when Docling is ready.
+- setLoadingState(title, subtitle)
+  Updates the loading card.
+- showBatchStatus(html)
+  Displays batch/folder conversion summaries.
+
+Input handling:
+- Drag/drop events prevent browser navigation and toggle drag styling.
+- processFile(file)
+  Routes .docx to conversion, .md/.txt to local Markdown preview.
+- processFiles(fileList, sourceLabel, forceBatch)
+  Single file becomes single conversion unless forceBatch is true; multiple
+  files start batch conversion.
+
+Single conversion:
+- startDocxConversion(file)
+  Calls POST /api/convert, loads returned Markdown into the editor, records
+  server paths, opens edit mode, and updates preview.
+
+Batch conversion:
+- startBatchConversion(files, sourceLabel)
+  Filters to .docx files, calls POST /api/convert-batch, then renders summary.
+- renderBatchResult(data, headerLabel)
+  Shows converted and failed file counts and details, then opens the output
+  folder when at least one file succeeded.
+
+Server-side folder scan:
+- scanFolderAndConvert()
+  Reads the folder path text box and recursive checkbox, calls
+  POST /api/convert-folder, then renders either a no-files message or the batch
+  summary.
+
+Local Markdown:
+- openLocalMarkdown(file)
+  Reads a local .md or .txt with FileReader and opens preview without server
+  save/open-folder behavior.
+
+Preview and editing:
+- updatePreview()
+  Uses marked to render Markdown. It rewrites image links from (Images/...) to
+  (/Outputs/Images/...) so browser preview can load server-hosted generated
+  images. It also converts [!IMPORTANT] and [!NOTE] blockquotes into styled
+  callout divs and runs Prism highlighting.
+- fmt(type)
+  Toolbar command dispatcher for headings, bold, italic, strike, inline code,
+  lists, blockquotes, code blocks, tables, links, images, important callouts,
+  and note callouts.
+- insertAtCursor(text)
+  Inserts text into the textarea, marks input, and refreshes preview.
+- insertTitle()
+  Prompts for title text and inserts a centered HTML title block.
+
+Table cleanup:
+- cleanFixTable()
+  Uses selected text or expands to the current table around the cursor.
+- cleanMarkdownTable(markdownTableText)
+  Parses pipe-table rows, removes separator/empty rows, removes repeated title
+  rows, then tries specialized cleanup before generic cleanup.
+- _tryPromotionPlan(rows)
+  Detects CHANNEL / Y/N / CONTENT NEEDED / OWNER / TIMING tables, reorders and
+  normalizes headers, centers relevant columns, and bolds the channel.
+- _tryFieldDetails(rows)
+  Detects label/value metadata tables, extracts left and right field/value
+  pairs, normalizes selected role names, deduplicates fields, and bolds Draft
+  status.
+- _genericTable(rows)
+  Normalizes columns, uses the first meaningful row as header, replaces empty
+  cells with "-", and bolds first-column body cells.
+- _renderTable(headers, alignments, bodyRows)
+  Rebuilds a Markdown pipe table.
+- _expandTableAtCursor(), getSelectedOrCurrentTable(),
+  replaceSelectedOrCurrentTable()
+  Locate and replace the table being cleaned.
+
+Save, copy, reset, and logs:
+- btnCopy handler copies Markdown to clipboard.
+- openFolder() calls /api/open-folder.
+- btnSave handler either opens a server overwrite modal or saves a local file.
+- confirmSave() posts edited Markdown to /api/save-changes.
+- doLocalSave() uses showSaveFilePicker when available, otherwise downloads a
+  Markdown Blob.
+- resetApp() clears UI state back to upload mode.
+- toggleLogs(), loadLogs(), clearLogs(), escHtml()
+  Expand/collapse log viewer, poll /logs/latest, clear logs, and HTML-escape log
+  lines.
+- stopService() posts /api/shutdown and navigates to about:blank.
+
+
+Call and dependency flow
+------------------------
+Normal startup:
+launch_silent.vbs
+  -> start_platform.py
+    -> GET /health probe
+    -> starts server.py if not running
+  -> opens loading.html
+    -> repeated GET /health
+    -> redirects to /
+      -> server.py serves index.html
+
+Server startup:
+server.py
+  -> imports logging_config.setup_logging()
+    -> imports paths.LOGS_ROOT
+      -> paths.py loads .env and creates runtime folders
+  -> starts background _init_converter()
+    -> imports docling.document_converter.DocumentConverter
+    -> stores converter or error
+
+Single conversion:
+index.html startDocxConversion()
+  -> POST /api/convert
+    -> server.py convert_document()
+      -> convert_file_to_markdown()
+        -> temporary upload file in TEMP_ROOT
+        -> _convert_docx_path_to_markdown()
+          -> _get_converter()
+          -> Docling convert()
+          -> PictureItem extraction to IMAGES_ROOT\<slug>\image_N.png
+          -> export_to_markdown(image_placeholder="IMAGE_TOKEN")
+          -> replace IMAGE_TOKEN with Images/<slug>/image_N.png
+          -> write OUTPUTS_ROOT\<safe-name>.md
+      -> JSON response with markdown and paths
+  -> index.html loads editor and preview
+
+Batch upload conversion:
+index.html startBatchConversion()
+  -> POST /api/convert-batch
+    -> server.py convert_documents_batch()
+      -> per uploaded file:
+        -> validate .docx
+        -> convert_file_to_markdown(... batch_output_name(), include_markdown=False)
+      -> return converted_files and failed_files
+  -> index.html renderBatchResult()
+
+Server folder conversion:
+index.html scanFolderAndConvert()
+  -> POST /api/convert-folder
+    -> server.py convert_documents_in_folder()
+      -> resolve and validate local folder path
+      -> glob *.docx or **\*.docx
+      -> skip files starting with ~$
+      -> _convert_docx_path_to_markdown() for each source path
+      -> return scanned_count, converted_files, failed_files
+  -> index.html renderBatchResult()
+
+Save edited Markdown:
+index.html confirmSave()
+  -> POST /api/save-changes
+    -> server.py save_changes()
+      -> validate output_file remains under OUTPUTS_ROOT, or sanitize doc_name
+      -> write Markdown to disk
+
+Preview images:
+server.py writes Markdown image links as Images/<image-folder>/image_N.png.
+index.html updatePreview() rewrites those relative links to /Outputs/Images/...
+server.py StaticFiles mount serves /Outputs from OUTPUTS_ROOT.
+
+Logs:
+logging_config.py writes LOGS_ROOT\app.log.
+index.html loadLogs()
+  -> GET /logs/latest
+index.html clearLogs()
+  -> DELETE /logs/latest
+
+Shutdown:
+index.html stopService() or stop_silent.vbs
+  -> POST /api/shutdown
+    -> server.py starts delayed os._exit(0)
+
+
+Active dependency notes
+-----------------------
+Python dependencies:
+- fastapi: HTTP server framework.
+- uvicorn: ASGI server used when server.py is run directly or via
+  python -m uvicorn server:app.
+- python-multipart: required by FastAPI UploadFile/form uploads.
+- pillow: used indirectly for image save support from Docling picture objects.
+- docling: document conversion engine.
+- python-dotenv: optional .env loading in paths.py.
+
+Frontend CDN dependencies:
+- marked: Markdown to HTML rendering.
+- Prism core and SQL component: syntax highlighting.
+
+Windows dependencies:
+- Python 3.10+.
+- Browser.
+- Windows Explorer integration via os.startfile.
+- pyw/pythonw for silent launch scripts.
+
+
+Archive folder: intent and status
+---------------------------------
+archive is a historical/prototype area for cloud and protected-file scenarios.
+It is not wired into the current active server.py. Treat it as reference code,
+not current runtime code.
+
+Important mismatch:
+Several archive modules import path constants such as TEMP_CLOUD,
+TEMP_PROTECTED, MIP_HELPER_PATH, and MIP_HELPER_ROOT from paths.py. The active
+paths.py currently defines only APP_DATA_ROOT, OUTPUTS_ROOT, IMAGES_ROOT,
+TEMP_ROOT, and LOGS_ROOT. That is another signal that archive modules are not
+currently executable without integration work.
+
+archive\README_MIP.md
+    Explains an intended MIP-protected file round trip: inspect protection,
+    decrypt working copy, convert/edit, reapply original label/protection, then
+    upload. It states that the app must not strip or downgrade labels and must
+    not upload edited files if protection reapply fails.
+
+archive\cloud_converter.py
+    Prototype SharePoint/OneDrive conversion pipeline. It downloads .docx bytes
+    with Microsoft Graph functions, checks whether bytes look like a ZIP-based
+    .docx, converts with Docling, and optionally uploads Markdown back to
+    SharePoint and/or saves locally. batch_convert_cloud() uses worker threads,
+    emits progress events, and returns succeeded/failed summaries.
+
+archive\graph_auth.py
+    Azure CLI based Graph auth helper. It shells out to az account
+    get-access-token for https://graph.microsoft.com and can report the current
+    az account. It has async and sync methods.
+
+archive\graph_client.py
+    Stateless Microsoft Graph helper functions. It can resolve SharePoint and
+    OneDrive URLs to drive_id/item_id, list .docx children of a folder, download
+    file bytes, upload Markdown via simple or resumable upload, and create or
+    resolve an output folder.
+
+archive\mip_helper_client.py
+    Python wrapper around a C# MipHelper.exe. It defines MIP-specific exception
+    classes and functions to inspect, unprotect, fetch-unprotect by URL,
+    reapply protection, and clean up temp decrypted files. It expects a full
+    framework-dependent .NET publish payload, not just MipHelper.exe.
+
+archive\protected_file_access.py
+    Word COM and auth prototype for DLP/IRM-protected files. It can detect
+    protected Office files, get current identity via Azure CLI or MSAL, use Word
+    COM to extract Markdown directly or save a temporary accessible copy, run
+    diagnostics, and clean up generated decrypted temp copies.
+
+archive\rms_batch_pipeline.py
+    Pipeline using PowerShell Unprotect-RMSFile. It keeps a persistent
+    PowerShell process for sequential RMS decrypt commands, then uses Docling
+    worker threads to convert decrypted temp files and clean them up.
+
+archive\word_batch_pipeline.py
+    Batch pipeline that attaches to a running authenticated Word instance. Word
+    COM creates temporary clean .docx copies sequentially, while a bounded queue
+    feeds parallel Docling conversion workers.
+
+archive\word_dispatch_pipeline.py
+    Similar to word_batch_pipeline.py, but starts a hidden Word process via COM
+    Dispatch. It keeps all Word COM calls on one thread and runs Docling in
+    parallel worker threads.
+
+archive\scripts\setup-windows.ps1
+    One-shot setup script intended for the archived MIP helper workflow. It
+    creates portable runtime folders, copies .env.example to .env, publishes
+    the C# helper, copies the full publish payload to the helper runtime folder,
+    and prints next steps.
+
+archive\MipHelper\README.md
+    Documents the C# helper process boundary and stable exit codes.
+
+archive\MipHelper\MipHelper.csproj
+    .NET 8 console project with Microsoft.InformationProtection.File,
+    Microsoft.Identity.Client, Microsoft.Identity.Client.Broker,
+    System.CommandLine, and System.Text.Json. Post-publish copies the whole
+    publish payload to the configured helper runtime folder.
+
+archive\MipHelper\Program.cs
+    C# command-line entry point. Commands:
+    - inspect: currently uses a ZIP-header heuristic and writes placeholder
+      metadata JSON.
+    - unprotect: currently copies input to output as a placeholder.
+    - protect: currently copies input to output as a placeholder.
+    - fetch-unprotect: more complete flow that acquires Graph token, downloads a
+      shared URL, initializes MIP File SDK, removes protection, and commits a
+      decrypted output.
+    Stable exit codes are 0 success, 10 not protected, 20 access denied, 30
+    reapply failed, 99 generic failure.
+
+archive\MipHelper\GraphDownloader.cs
+    Minimal Graph client for fetch-unprotect. Encodes sharing URLs as Graph
+    share IDs, resolves /shares/{id}/driveItem, and streams file content to a
+    destination path.
+
+archive\MipHelper\MipAuth.cs
+    MSAL public client builder and token acquisition helper. Uses environment
+    variables MIP_CLIENT_ID, MIP_TENANT_ID, MIP_REDIRECT_URI. Token acquisition
+    order is silent cache/broker, Integrated Windows Auth, then interactive
+    WAM/browser.
+
+archive\MipHelper\MipDelegates.cs
+    Implements MIP SDK auth and consent delegates. MipAuthDelegate converts MIP
+    resource requests into MSAL .default scopes. MipConsentDelegate auto-accepts
+    policy consent prompts and leaves actual rights enforcement to RMS/MIP.
+
+archive\MipHelper\bin and archive\MipHelper\obj
+    Tracked build outputs and NuGet/dependency artifacts for the C# helper.
+    There are many DLLs and generated files here. They are not handwritten app
+    logic; source of truth is the .cs files and .csproj.
+
+
+Design intent
+-------------
+The current product intent is to be a non-cloud, low-friction, local converter
+for Word documents:
+
+- The primary user starts it by double-clicking launch_silent.vbs.
+- The user sees a local browser UI, not a terminal.
+- The app converts .docx files with local Docling.
+- The output Markdown is immediately editable and previewable.
+- Images are extracted next to the Markdown so links work outside the app.
+- Batch conversion emphasizes throughput and review by adding a -BATCH suffix.
+- Logs are visible in the UI so non-developers can diagnose failures.
+- Stop controls are exposed in both the UI and a double-click script.
+
+The archive suggests an earlier or future broader intent:
+
+- Convert SharePoint/OneDrive documents through Microsoft Graph.
+- Handle MIP/Purview/RMS-protected documents without bypassing policy.
+- Use Word COM or MIP SDK helper workflows when Docling cannot read protected
+  files directly.
+- Preserve or reapply labels before uploading edited outputs.
+
+That broader protected/cloud scope is not active in the current root app.
+
+
+Operational notes for maintainers
+---------------------------------
+- The active app binds to 127.0.0.1 only. The server-side folder scan endpoint
+  can read arbitrary local folders supplied by the local browser UI, which is
+  acceptable only because the service is local-only.
+- CORS currently allows all origins. With a loopback-only app this is convenient,
+  but if the host binding ever changes, CORS and local-file operations need to
+  be tightened.
+- /api/shutdown uses os._exit(0), so it terminates immediately after the short
+  delay and does not run normal graceful shutdown cleanup.
+- setup_logging() adds handlers whenever imported/run. If server reload or
+  repeated setup in the same process is introduced, duplicate handlers should
+  be guarded against.
+- _init_converter() creates PdfPipelineOptions but does not pass those options
+  into DocumentConverter. The active image extraction still works through
+  PictureItem.get_image(), but if picture behavior changes, revisit Docling
+  pipeline configuration.
+- Generated Outputs and __pycache__ are ignored for future changes but already
+  tracked. Consider removing them from version control if the repo should stay
+  source-only.
+- Archive code should be updated or deleted before being presented as supported
+  functionality. It has stale path imports and placeholder MIP behavior.
+
+
+Quick mental model
+------------------
+If you only need to understand the live app, read these files in this order:
+
+1. README.md for user behavior.
+2. paths.py for where data goes.
+3. server.py for API and conversion behavior.
+4. index.html for UI behavior and API calls.
+5. start_platform.py, loading.html, launch_silent.vbs for startup behavior.
+6. stop_platform.py, stop_silent.vbs for shutdown behavior.
+
+The rest of the archive is useful background for cloud/protected-document
+experiments but is not part of the active local converter.

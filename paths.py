@@ -1,12 +1,12 @@
 """
 Central path configuration for the Word-to-Markdown app.
 
-All runtime locations are routed through environment variables loaded from a
-local ``.env`` file. The defaults keep everything portable under
-``C:/temp/W2MD`` so the app never depends on per-user paths.
+The default runtime location is the project/app folder containing this file.
+Set ``APP_DATA_ROOT`` in ``.env`` or the environment to move all runtime files
+elsewhere.
 
 Layout (defaults):
-    C:/temp/W2MD/
+    <project folder>/
         Outputs/           all converted Markdown (single + batch)
             Images/        images extracted by Docling
         Temp/              short-lived per-request scratch files
@@ -32,11 +32,13 @@ def _path_from_env(name: str, default: Path) -> Path:
     return default
 
 
-APP_DATA_ROOT: Path = _path_from_env("APP_DATA_ROOT", Path("C:/temp/W2MD"))
-OUTPUTS_ROOT: Path = _path_from_env("OUTPUTS_ROOT", APP_DATA_ROOT / "Outputs")
-IMAGES_ROOT: Path = _path_from_env("IMAGES_ROOT", OUTPUTS_ROOT / "Images")
-TEMP_ROOT: Path = _path_from_env("TEMP_ROOT", APP_DATA_ROOT / "Temp")
-LOGS_ROOT: Path = _path_from_env("LOGS_ROOT", APP_DATA_ROOT / "Logs")
+PROJECT_ROOT: Path = Path(__file__).resolve().parent
+
+APP_DATA_ROOT: Path = _path_from_env("APP_DATA_ROOT", PROJECT_ROOT)
+OUTPUTS_ROOT: Path = APP_DATA_ROOT / "Outputs"
+IMAGES_ROOT: Path = OUTPUTS_ROOT / "Images"
+TEMP_ROOT: Path = APP_DATA_ROOT / "Temp"
+LOGS_ROOT: Path = APP_DATA_ROOT / "Logs"
 
 
 _REQUIRED_DIRS = (

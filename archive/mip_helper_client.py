@@ -86,10 +86,10 @@ def _resolve_helper_path() -> str:
 
     Resolution order:
       1. ``MIP_HELPER_PATH`` (env / .env, default
-         ``C:/temp/W2MD/MipHelper/MipHelper.exe``) — return if its sibling
+         ``<APP_DATA_ROOT>/MipHelper/MipHelper.exe``) — return if its sibling
          ``MipHelper.dll`` is also present.
       2. ``MIP_HELPER_ROOT/MipHelper.exe`` (default
-         ``C:/temp/W2MD/MipHelper/MipHelper.exe``) — same payload check.
+         ``<APP_DATA_ROOT>/MipHelper/MipHelper.exe``) — same payload check.
       3. Repo-relative publish folder
          (``MipHelper/bin/Release/net8.0/win-x64/publish``). If found, copy
          the **entire** folder contents to ``MIP_HELPER_ROOT`` and return

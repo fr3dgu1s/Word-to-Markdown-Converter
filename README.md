@@ -58,18 +58,29 @@ Then open <http://127.0.0.1:8000>.
 
 ## Default folders
 
-The app routes everything through `C:/temp/W2MD` so it never depends on
-per-user paths. Folders are created automatically on first run.
+By default, the app stores runtime files in the project/app folder that
+contains `paths.py`. Folders are created automatically on first run.
 
 | Path | Purpose |
 | --- | --- |
-| `C:/temp/W2MD/Outputs`        | All converted Markdown (single + batch) |
-| `C:/temp/W2MD/Outputs/Images` | Extracted images (one sub-folder per document) |
-| `C:/temp/W2MD/Temp`           | Short-lived upload scratch space |
-| `C:/temp/W2MD/Logs`           | `app.log` and rotated history |
+| `<project folder>\Outputs`        | All converted Markdown (single + batch) |
+| `<project folder>\Outputs\Images` | Extracted images (one sub-folder per document) |
+| `<project folder>\Temp`           | Short-lived upload scratch space |
+| `<project folder>\Logs`           | `app.log` and rotated history |
 
-Override any of these by editing [.env](.env) (`APP_DATA_ROOT`,
-`OUTPUTS_ROOT`, `IMAGES_ROOT`, `TEMP_ROOT`, `LOGS_ROOT`).
+`APP_DATA_ROOT` is the source of truth. If you set it in [.env](.env) or as an
+environment variable, `Outputs`, `Outputs\Images`, `Temp`, and `Logs` are
+created under that folder. If it is not set, the project folder is used.
+
+Example default layout:
+
+```text
+APP_DATA_ROOT=<project folder>
+OUTPUTS_ROOT=<project folder>\Outputs
+IMAGES_ROOT=<project folder>\Outputs\Images
+TEMP_ROOT=<project folder>\Temp
+LOGS_ROOT=<project folder>\Logs
+```
 
 ## Single file conversion
 
@@ -78,7 +89,7 @@ Override any of these by editing [.env](.env) (`APP_DATA_ROOT`,
 3. Edit using the toolbar (headings, bold, italics, lists, callouts,
    code blocks, tables, etc.).
 4. Switch to **Visual Preview** to render the Markdown with images.
-5. Click **Save** to update `C:/temp/W2MD/Outputs/<doc-name>.md`,
+5. Click **Save** to update `<project folder>\Outputs\<doc-name>.md`,
    or **Copy** to copy Markdown to the clipboard.
 
 ### Editor commands
@@ -124,7 +135,7 @@ exported from Word:
 ## Batch conversion
 
 You have three ways to convert many `.docx` files at once. All three write
-results into `C:/temp/W2MD/Outputs` and use the `-BATCH` suffix in the
+results into `<project folder>\Outputs` and use the `-BATCH` suffix in the
 filename — e.g. `Security Spec.docx` becomes `Security Spec-BATCH.md` —
 to flag that the file still needs review/editing before being treated as
 final. Each method skips non-`.docx` files and continues on individual
@@ -168,7 +179,7 @@ You have three options:
 
 ## Logs
 
-- File: `C:/temp/W2MD/Logs/app.log` (rotates automatically).
+- File: `<project folder>\Logs\app.log` (rotates automatically).
 - The bottom **Logs** card in the UI streams the latest 100 lines.
 - `DELETE /logs/latest` (or the **Clear** button) truncates the log file.
 
@@ -178,11 +189,11 @@ You have three options:
 | --- | --- |
 | `Failed to fetch` in the browser | Server not running — re-launch with [launch_silent.vbs](launch_silent.vbs) (or `python -m uvicorn server:app`). |
 | Port already in use | Stop the previous instance with [stop_silent.vbs](stop_silent.vbs) or `taskkill /F /IM pythonw.exe`. For manual mode, pick another port: `python -m uvicorn server:app --port 8001`. |
-| Browser opens the loading page but never redirects | The Docling first-run model download is still in progress — wait a minute and refresh. Check `C:/temp/W2MD/Logs/app.log` if it persists. |
+| Browser opens the loading page but never redirects | The Docling first-run model download is still in progress — wait a minute and refresh. Check `<project folder>\Logs\app.log` if it persists. |
 | `Document converter failed to initialise` | Re-run `python -m pip install -r requirements.txt`. The first run downloads Docling models — make sure you have internet access. |
 | `.docx` won't open / "file already in use" | Close the document in Microsoft Word and try again. |
 | Encrypted / IRM-protected `.docx` fails | This app is local-only and does not handle protected files. Decrypt the document in Word first (open it, save a copy as `.docx`), then convert that copy. |
-| Images don't appear in preview | Ensure conversion completed successfully and that `C:/temp/W2MD/Outputs/Images/<doc>/` contains PNG files. |
+| Images don't appear in preview | Ensure conversion completed successfully and that `<project folder>\Outputs\Images\<doc>\` contains PNG files. |
 
 ## Acknowledgements
 
