@@ -1,11 +1,14 @@
 """
 Central path configuration for the Word-to-Markdown app.
 
-The default runtime location is the project/app folder containing this file.
-Set ``APP_DATA_ROOT`` in ``.env`` or the environment to move all runtime files
-elsewhere.
+Runtime files are ALWAYS stored in the folder that contains ``paths.py``
+(i.e. the project/app folder where ``server.py`` lives). Any
+``APP_DATA_ROOT`` value in ``.env`` or the process environment is
+intentionally ignored to guarantee that what the user sees in the UI and
+what gets written to disk are the same folder. ``.env`` is still loaded for
+other settings (update-check, MSAL, etc.).
 
-Layout (defaults):
+Layout:
     <project folder>/
         Outputs/           all converted Markdown (single + batch)
             Images/        images extracted by Docling
@@ -25,16 +28,22 @@ except ImportError:
     pass
 
 
-def _path_from_env(name: str, default: Path) -> Path:
-    raw = os.getenv(name)
-    if raw and raw.strip():
-        return Path(raw.strip()).expanduser()
-    return default
-
-
 PROJECT_ROOT: Path = Path(__file__).resolve().parent
 
-APP_DATA_ROOT: Path = _path_from_env("APP_DATA_ROOT", PROJECT_ROOT)
+# Runtime root is pinned to the project folder. We deliberately do NOT honour
+# ``APP_DATA_ROOT`` from the environment so output cannot drift away from the
+# folder that hosts ``server.py``.
+APP_DATA_ROOT: Path = PROJECT_ROOT
+
+_stale_env_value = (os.getenv("APP_DATA_ROOT") or "").strip()
+if _stale_env_value and Path(_stale_env_value).expanduser().resolve() != PROJECT_ROOT.resolve():
+    os.environ["APP_DATA_ROOT"] = str(PROJECT_ROOT)
+    print(
+        f"[paths] Ignoring APP_DATA_ROOT={_stale_env_value!r}; "
+        f"runtime is pinned to {PROJECT_ROOT}.",
+        flush=True,
+    )
+
 OUTPUTS_ROOT: Path = APP_DATA_ROOT / "Outputs"
 IMAGES_ROOT: Path = OUTPUTS_ROOT / "Images"
 TEMP_ROOT: Path = APP_DATA_ROOT / "Temp"
@@ -58,7 +67,7 @@ def ensure_runtime_dirs() -> None:
     except OSError as exc:
         raise RuntimeError(
             f"The app could not create {APP_DATA_ROOT}. "
-            "Check local permissions or set APP_DATA_ROOT in .env. "
+            "Check that the project folder is writable. "
             f"Underlying error: {exc}"
         ) from exc
 

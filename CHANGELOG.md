@@ -11,6 +11,15 @@ here.
   walking, sequential per-file conversion, live progress UI, and clickable
   converted results.
 
+### Changed
+
+- Runtime root is now pinned to the project folder that contains
+  `server.py` / `paths.py`. `APP_DATA_ROOT` from `.env` or the process
+  environment is no longer honoured — saves always land in
+  `<project folder>\Outputs`, matching what the UI serves at
+  `/Outputs`. A startup notice is printed if a stale `APP_DATA_ROOT` is
+  detected so the user knows it was ignored.
+
 ## 2026-05-05
 
 ### Added

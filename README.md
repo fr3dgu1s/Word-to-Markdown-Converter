@@ -93,8 +93,9 @@ git pull origin main
 
 ## Default folders
 
-By default, the app stores runtime files in the project/app folder that
-contains `paths.py`. Folders are created automatically on first run.
+The app **always** stores runtime files in the project/app folder that
+contains `paths.py` / `server.py`. Folders are created automatically on
+first run.
 
 | Path | Purpose |
 | --- | --- |
@@ -103,19 +104,11 @@ contains `paths.py`. Folders are created automatically on first run.
 | `<project folder>\Temp`           | Short-lived upload scratch space |
 | `<project folder>\Logs`           | `app.log` and rotated history |
 
-`APP_DATA_ROOT` is the source of truth. If you set it in [.env](.env) or as an
-environment variable, `Outputs`, `Outputs\Images`, `Temp`, and `Logs` are
-created under that folder. If it is not set, the project folder is used.
-
-Example default layout:
-
-```text
-APP_DATA_ROOT=<project folder>
-OUTPUTS_ROOT=<project folder>\Outputs
-IMAGES_ROOT=<project folder>\Outputs\Images
-TEMP_ROOT=<project folder>\Temp
-LOGS_ROOT=<project folder>\Logs
-```
+The runtime root is pinned to the project folder. `APP_DATA_ROOT` from
+`.env` or the process environment is intentionally ignored so the **Save**
+button always writes to the same `Outputs` folder that the running server
+serves at `http://127.0.0.1:8000/Outputs`. If you want runtime files in a
+different location, move (or symlink) the entire project folder there.
 
 ## Usage
 
