@@ -5,3 +5,4 @@ pillow
 docling
 python-dotenv
 pywin32
+python-docx
