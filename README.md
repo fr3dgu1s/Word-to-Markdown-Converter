@@ -69,10 +69,130 @@ The launcher starts the Python server in the background using `pyw` /
 If you prefer a terminal (e.g. for development or to see live logs):
 
 ```powershell
-python -m uvicorn server:app
+python server.py serve
 ```
 
 Then open <http://127.0.0.1:8000>.
+
+`python server.py` with no arguments still starts the web server on
+`127.0.0.1:8000`.
+
+## Command-line conversion
+
+`server.py` can also be executed directly as a command-line converter. This is
+useful for local batch jobs, PowerShell scripts, scheduled tasks, GitHub
+Copilot skills, or any AI command that needs to convert an existing Word file
+without opening the browser UI.
+
+By default, converted files are written to `<project folder>\Outputs`. Use
+`-o` / `--output-dir` to write Markdown and extracted images somewhere else.
+When converting Markdown back to Word, `-o` can be either a `.docx` file path or
+a destination folder.
+
+### Quick examples
+
+Run these commands from the project folder:
+
+```powershell
+Set-Location "C:\Users\fresantos\Word-to-Markdown-Converter"
+
+# Convert one Word document to Markdown.
+python server.py docx-to-md "C:\Docs\spec.docx"
+
+# Convert one Word document to Markdown and choose the output folder.
+python server.py docx-to-md "C:\Docs\spec.docx" -o "C:\Docs\converted"
+
+# Convert all .docx files in a folder, including subfolders.
+python server.py batch-docx-to-md "C:\Docs" -o "C:\Docs\converted"
+
+# Convert only .docx files directly inside the folder, not subfolders.
+python server.py batch-docx-to-md "C:\Docs" --no-recursive
+
+# Convert Markdown back to Word.
+python server.py md-to-docx "C:\Docs\converted\spec.md" -o "C:\Docs\spec.docx"
+
+# Auto-detect whether the input is a .docx, Markdown file, or folder.
+python server.py convert "C:\Docs\spec.docx"
+python server.py convert "C:\Docs\converted\spec.md" -o "C:\Docs\spec.docx"
+python server.py convert "C:\Docs" -o "C:\Docs\converted"
+```
+
+### Commands
+
+| Command | Alias | Purpose |
+| --- | --- | --- |
+| `serve` | | Start the local FastAPI server. |
+| `docx-to-md` | `word-to-md` | Convert a single `.docx` to Markdown. |
+| `batch-docx-to-md` | `batch` | Convert all `.docx` files in a folder. Recursive by default. |
+| `md-to-docx` | `md-to-word` | Convert `.md`, `.markdown`, or `.txt` to `.docx`. |
+| `convert` | | Auto-detect a `.docx`, Markdown file, or folder. |
+
+Use `python server.py --help` or `python server.py <command> --help` to see the
+available arguments for each command.
+
+### Calling from an AI skill or command
+
+For automation, add `--json` so the command returns machine-readable output
+with the generated paths. The JSON output is intentionally kept on stdout so
+callers can parse it directly.
+
+```powershell
+# Single DOCX -> Markdown, returning JSON.
+python server.py docx-to-md "C:\Docs\spec.docx" -o "C:\Docs\converted" --json
+
+# Batch folder conversion, returning JSON.
+python server.py batch-docx-to-md "C:\Docs" -o "C:\Docs\converted" --json
+
+# Auto-detect input type and return JSON.
+python server.py convert "C:\Docs\spec.docx" --json
+```
+
+Single-file JSON includes the input path, generated Markdown path, output
+directory, and image folder:
+
+```json
+{
+  "doc_name": "spec",
+  "output_file": "C:\\Docs\\converted\\spec.md",
+  "image_dir": "spec",
+  "output_dir": "C:\\Docs\\converted",
+  "input": "C:\\Docs\\spec.docx"
+}
+```
+
+Batch JSON includes counts plus per-file success and failure lists:
+
+```json
+{
+  "output_dir": "C:\\Docs\\converted",
+  "scanned_folder": "C:\\Docs",
+  "scanned_count": 2,
+  "converted_count": 2,
+  "failed_count": 0,
+  "converted_files": [
+    {
+      "input": "C:\\Docs\\one.docx",
+      "output": "C:\\Docs\\converted\\one-BATCH.md"
+    }
+  ],
+  "failed_files": []
+}
+```
+
+If the caller needs the Markdown content instead of a file path, use
+`--print-markdown` with single-file conversion:
+
+```powershell
+python server.py docx-to-md "C:\Docs\spec.docx" --print-markdown
+```
+
+### Markdown-to-Word behavior
+
+Markdown-to-Word conversion uses Pandoc when `pandoc` is available on `PATH`
+because Pandoc gives the best fidelity. If Pandoc is not installed, the app
+falls back to `python-docx` and preserves common Markdown structures such as
+headings, lists, tables, block quotes, code blocks, links, and images as
+readable Word content.
 
 ## Updates and changelog
 
