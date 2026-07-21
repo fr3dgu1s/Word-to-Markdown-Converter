@@ -19,6 +19,17 @@ here.
   `<project folder>\Outputs`, matching what the UI serves at
   `/Outputs`. A startup notice is printed if a stale `APP_DATA_ROOT` is
   detected so the user knows it was ignored.
+- The silent launcher now manages a project-local `.venv` automatically. It
+  creates or repairs the environment, installs dependencies when they are
+  missing, and reapplies `requirements.txt` when the file changes.
+
+### Fixed
+
+- Fixed silent startup after moving the repository or migrating to a new
+  machine where the system `pyw` interpreter doesn't have the application
+  dependencies installed.
+- Added dependency bootstrap logging at `Logs\bootstrap.log` so startup
+  failures no longer depend on hidden `pythonw` output.
 
 ## 2026-05-05
 

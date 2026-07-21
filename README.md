@@ -37,8 +37,14 @@ and preview.
 
 ## Setup
 
+The silent launcher automatically creates a project-local `.venv` and installs
+or updates dependencies when `requirements.txt` changes. No manual environment
+activation is required to use the launcher.
+
+For manual development:
+
 ```powershell
-# 1. (optional) create a virtual environment
+# 1. create a virtual environment
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 
@@ -55,12 +61,15 @@ required:
 
 1. Double-click [launch_silent.vbs](launch_silent.vbs) (or right-click →
    *Open*).
-2. A loading page opens in your default browser. It polls the server and
+2. The launcher creates or repairs `.venv` and installs changed requirements
+   when needed.
+3. A loading page opens in your default browser. It polls the server and
    automatically redirects to <http://127.0.0.1:8000> as soon as the
    converter is ready.
 
 The launcher starts the Python server in the background using `pyw` /
-`pythonw`, so no console window is shown. To stop the app, either click
+`pythonw`, so no console window is shown. Bootstrap details are written to
+`Logs\bootstrap.log`. To stop the app, either click
 **Stop Python App** in the UI or double-click
 [stop_silent.vbs](stop_silent.vbs).
 
@@ -397,7 +406,7 @@ You have three options:
 | --- | --- |
 | `Failed to fetch` in the browser | Server not running — re-launch with [launch_silent.vbs](launch_silent.vbs) (or `python -m uvicorn server:app`). |
 | Port already in use | Stop the previous instance with [stop_silent.vbs](stop_silent.vbs) or `taskkill /F /IM pythonw.exe`. For manual mode, pick another port: `python -m uvicorn server:app --port 8001`. |
-| Browser opens the loading page but never redirects | The Docling first-run model download is still in progress — wait a minute and refresh. Check `<project folder>\Logs\app.log` if it persists. |
+| Browser opens the loading page but never redirects | Dependency installation or the Docling first-run model download might still be in progress. Check `<project folder>\Logs\bootstrap.log`, then `<project folder>\Logs\app.log`. |
 | `Document converter failed to initialise` | Re-run `python -m pip install -r requirements.txt`. The first run downloads Docling models — make sure you have internet access. |
 | `.docx` won't open / "file already in use" | Close the document in Microsoft Word and try again. |
 | Purview / MIP-protected `.docx` fails | Ensure Microsoft Word is installed, signed in to Office 365, and the current user has rights to open/export the file. If policy requires labels, configure `strip_protection_and_save()` with a non-encrypting label GUID. |
